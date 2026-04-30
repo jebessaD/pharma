@@ -14,7 +14,13 @@ type CreateUserBody = {
   branch_id?: string | null;
 };
 
-const allowedRoles = new Set(["admin", "pharmacist", "cashier"]);
+const ownerAllowedRoles = new Set([
+  "admin",
+  "pharmacist",
+  "cashier",
+  "seller",
+]);
+const adminAllowedRoles = new Set(["pharmacist", "cashier", "seller"]);
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -105,7 +111,8 @@ Deno.serve(async (req: Request) => {
       headers: { ...corsHeaders, "Content-Type": "text/plain" },
     });
   }
-  if (callerProfile == null || callerProfile.role != "admin" ||
+  if (callerProfile == null ||
+    (callerProfile.role != "admin" && callerProfile.role != "owner") ||
     callerProfile.is_active != true) {
     return new Response("forbidden", {
       status: 403,
@@ -114,6 +121,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const teamId = callerProfile.team_id as string;
+  const callerRole = callerProfile.role as string;
 
   const body = (await req.json()) as CreateUserBody;
   const password = body.password;
@@ -199,6 +207,7 @@ Deno.serve(async (req: Request) => {
       headers: { ...corsHeaders, "Content-Type": "text/plain" },
     });
   }
+  const allowedRoles = callerRole == "owner" ? ownerAllowedRoles : adminAllowedRoles;
   if (!allowedRoles.has(role)) {
     return new Response("bad_role", {
       status: 400,

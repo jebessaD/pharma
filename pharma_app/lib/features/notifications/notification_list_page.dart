@@ -6,6 +6,7 @@ import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/widgets/app_error_state.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 
 class NotificationListPage extends ConsumerStatefulWidget {
   const NotificationListPage({super.key});
@@ -54,13 +55,19 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage> {
       _error = null;
     });
     try {
+      final branchId = ref.read(selectedBranchIdProvider);
       final data = await Supabase.instance.client
           .from('notifications')
           .select()
           .eq('team_id', teamId)
           .order('created_at', ascending: false)
-          .limit(100);
-      setState(() => _rows = List<Map<String, dynamic>>.from(data as List));
+          .limit(200);
+      final rows = List<Map<String, dynamic>>.from(data as List).where((n) {
+        final b = n['branch_id'] as String?;
+        if (branchId == null) return b == null;
+        return b == null || b == branchId;
+      }).toList();
+      setState(() => _rows = rows);
     } catch (e) {
       setState(() => _error = userFacingError(e));
     } finally {
@@ -125,8 +132,9 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Notifications'),
+      appBar: pharmacyHubAppBar(
+        context,
+        title: 'Notifications',
         actions: [
           TextButton(
             onPressed: _loading ? null : _markAllRead,

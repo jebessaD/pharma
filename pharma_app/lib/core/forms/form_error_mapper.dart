@@ -93,6 +93,9 @@ String _userFacingFunction(FunctionException e) {
   }
   final lower = text.toLowerCase();
 
+  if (lower == 'invalid_credentials' || lower.contains('invalid login')) {
+    return 'Invalid username or password. Check your details and try again.';
+  }
   if (e.status == 401 || lower == 'unauthorized') {
     return 'Your session has expired. Please sign in again.';
   }
@@ -120,11 +123,20 @@ String _userFacingFunction(FunctionException e) {
   if (lower == 'ambiguous_username') {
     return 'That username exists on more than one pharmacy. Sign in with the full email instead.';
   }
-  if (lower == 'invalid_credentials' || lower.contains('invalid login')) {
-    return 'Invalid username or password. Check your details and try again.';
+  if (lower == 'profile_exists') {
+    return 'This account already has a pharmacy profile. Sign in instead of registering again.';
+  }
+  if (lower == 'invalid_team_name' || lower == 'invalid_full_name') {
+    return 'Enter a valid pharmacy name and your full name.';
   }
   if (lower == 'server_env_missing' || lower == 'method_not_allowed') {
     return 'The server could not run this action. Check edge function secrets (e.g. SUPABASE_SERVICE_ROLE_KEY) or contact support.';
+  }
+  if (lower.contains('admin-create-user') ||
+      lower.contains('function not found') ||
+      lower.contains('route not found') ||
+      lower.contains('not found')) {
+    return 'Staff creation service is missing in the connected backend. Deploy edge function admin-create-user on the pharma Supabase project.';
   }
   if (lower.contains('already been registered') ||
       lower.contains('user already registered') ||
@@ -166,8 +178,23 @@ String _userFacingPostgrest(PostgrestException e) {
   if (m.contains('permission') || m.contains('row-level') || m.contains('policy')) {
     return 'You do not have permission for this action.';
   }
+  if (m.contains('relation') && m.contains('does not exist')) {
+    if (m.contains('branches')) {
+      return 'Branches table is missing in the connected database. Connect the pharma Supabase project and run pharma migrations.';
+    }
+    if (m.contains('profiles') || m.contains('user_profiles')) {
+      return 'Profile tables do not match this app schema. Connect the correct pharma Supabase project and run migrations.';
+    }
+    return 'Database schema is incomplete for this screen. Connect the correct pharma project and run migrations.';
+  }
   if (e.code == '23505' || m.contains('duplicate') || m.contains('unique')) {
     return 'This record already exists. Use a different value.';
+  }
+  if (m.contains('billing_blocked')) {
+    return 'This account cannot record changes until billing is resolved. Contact support or your owner.';
+  }
+  if (m.contains('team_suspended')) {
+    return 'This pharmacy team is suspended. Contact support.';
   }
   if (m.contains('insufficient_stock')) {
     return 'Not enough stock for this sale. Reduce quantities or choose another batch.';
@@ -186,6 +213,15 @@ String _userFacingPostgrest(PostgrestException e) {
   }
   if (m.contains('medicine_not_found')) {
     return 'One of the medicines was not found for your team.';
+  }
+  if (m.contains('branch_not_found')) {
+    return 'A selected branch was not found.';
+  }
+  if (m.contains('same_branch')) {
+    return 'Source and target branch must be different.';
+  }
+  if (m.contains('conflict_mode_not_supported')) {
+    return 'Only skip-existing duplication mode is supported.';
   }
   if (m.contains('bad_branch')) {
     return 'That branch is not valid for your team.';

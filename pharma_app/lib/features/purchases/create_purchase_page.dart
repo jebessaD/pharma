@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/branch_change_guard_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/utils/date_formatters.dart';
+import '../../core/widgets/slash_dd_mm_yyyy_input.dart';
 import '../medicines/searchable_picker_fields.dart';
 
 class CreatePurchasePage extends ConsumerStatefulWidget {
@@ -29,8 +30,6 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
   final _expiry = TextEditingController();
   final _qty = TextEditingController();
   final _cost = TextEditingController();
-  final _dateFmt = DateFormat('yyyy-MM-dd');
-  DateTime? _expiryDate;
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -46,10 +45,9 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     _cost.addListener(_syncDirtyState);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ref.read(branchChangeGuardProvider.notifier).register(
-            _guardKey,
-            onDiscard: _discardChanges,
-          );
+      ref
+          .read(branchChangeGuardProvider.notifier)
+          .register(_guardKey, onDiscard: _discardChanges);
     });
     Future.microtask(_bootstrap);
   }
@@ -72,10 +70,12 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
 
   bool get _isDirty =>
       _selectedMedicineId != null ||
-      (_supplierId != null && _suppliers.isNotEmpty && _supplierId != _suppliers.first['id']) ||
+      (_supplierId != null &&
+          _suppliers.isNotEmpty &&
+          _supplierId != _suppliers.first['id']) ||
       _invoice.text.trim().isNotEmpty ||
       _batch.text.trim().isNotEmpty ||
-      _expiryDate != null ||
+      _expiry.text.trim().isNotEmpty ||
       _qty.text.trim().isNotEmpty ||
       _cost.text.trim().isNotEmpty;
 
@@ -87,7 +87,6 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     if (!mounted) return;
     setState(() {
       _selectedMedicineId = null;
-      _expiryDate = null;
       _invoice.clear();
       _batch.clear();
       _expiry.clear();
@@ -107,11 +106,19 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
   Future<void> _bootstrap() async {
     final profile = await ref.read(pharmacyProfileProvider.future);
     final teamId = profile?['team_id'] as String?;
+    final branchId = ref.read(selectedBranchIdProvider);
     if (!mounted) return;
     if (teamId == null) {
       setState(() {
         _loading = false;
         _error = 'No team';
+      });
+      return;
+    }
+    if (branchId == null) {
+      setState(() {
+        _loading = false;
+        _error = 'Select a branch first.';
       });
       return;
     }
@@ -125,32 +132,22 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
           .from('medicines')
           .select()
           .eq('team_id', teamId)
+          .eq('branch_id', branchId)
           .order('name');
       setState(() {
         _suppliers = List<Map<String, dynamic>>.from(sup as List);
         _medicines = List<Map<String, dynamic>>.from(med as List);
-        if (_suppliers.isNotEmpty) _supplierId = _suppliers.first['id'] as String;
+        if (_suppliers.isNotEmpty) {
+          _supplierId = _suppliers.first['id'] as String;
+        }
       });
     } catch (e) {
-      setState(() => _error = 'Failed to load suppliers or medicines. Please refresh.');
+      setState(
+        () => _error = 'Failed to load suppliers or medicines. Please refresh.',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  Future<void> _pickExpiryDate() async {
-    final initial = _expiryDate ?? DateTime.now().add(const Duration(days: 365));
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-    );
-    if (picked == null) return;
-    setState(() {
-      _expiryDate = picked;
-      _expiry.text = _dateFmt.format(picked);
-    });
   }
 
   Future<void> _saveDraft() async {
@@ -169,7 +166,17 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     }
     final qty = num.tryParse(_qty.text);
     final cost = num.tryParse(_cost.text);
-    if (qty == null || qty <= 0 || cost == null || cost < 0) {
+    final expiryError = slashDdMmYyyyExpiryError(
+      _expiry.text,
+      DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
+    );
+    final expiryIso = slashDdMmYyyyToIso(_expiry.text);
+    if (qty == null ||
+        qty <= 0 ||
+        cost == null ||
+        cost < 0 ||
+        expiryError != null ||
+        expiryIso == null) {
       setState(() => _error = 'Enter valid quantity and unit cost');
       return;
     }
@@ -184,7 +191,9 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
             'team_id': teamId,
             'branch_id': branchId,
             'supplier_id': _supplierId,
-            'invoice_reference': _invoice.text.trim().isEmpty ? null : _invoice.text.trim(),
+            'invoice_reference': _invoice.text.trim().isEmpty
+                ? null
+                : _invoice.text.trim(),
             'status': 'draft',
           })
           .select('id')
@@ -194,7 +203,7 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
         'purchase_id': pid,
         'medicine_id': mid,
         'batch_no': _batch.text.trim(),
-        'expiry_date': _dateFmt.format(_expiryDate!),
+        'expiry_date': expiryIso,
         'qty_base_unit': qty,
         'unit_cost': cost,
       });
@@ -202,11 +211,16 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
       _syncDirtyState();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Draft saved. You can now receive goods.')),
+          const SnackBar(
+            content: Text('Draft saved. You can now receive goods.'),
+          ),
         );
       }
     } catch (_) {
-      setState(() => _error = 'Could not save draft purchase. Check inputs and try again.');
+      setState(
+        () => _error =
+            'Could not save draft purchase. Check inputs and try again.',
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -226,8 +240,14 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
           'This posts stock into inventory for the saved draft purchase. Continue?',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Receive')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Receive'),
+          ),
         ],
       ),
     );
@@ -237,7 +257,10 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
       _error = null;
     });
     try {
-      await Supabase.instance.client.rpc('receive_purchase', params: {'p_purchase_id': id});
+      await Supabase.instance.client.rpc(
+        'receive_purchase',
+        params: {'p_purchase_id': id},
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Purchase received and stock updated.')),
@@ -282,21 +305,28 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
                     setState(() => _supplierId = v);
                     _syncDirtyState();
                   },
-                  validator: (value) => value == null ? 'Select a supplier' : null,
+                  validator: (value) =>
+                      value == null ? 'Select a supplier' : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _invoice,
-                  decoration: const InputDecoration(labelText: 'Invoice reference'),
+                  decoration: const InputDecoration(
+                    labelText: 'Invoice reference',
+                  ),
                 ),
                 const SizedBox(height: 16),
-                Text('Line item', style: Theme.of(context).textTheme.titleSmall),
+                Text(
+                  'Line item',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
                 const SizedBox(height: 8),
                 MedicineAutocompleteField(
                   rows: _medicines,
                   initialMedicineId: _selectedMedicineId,
                   label: 'Medicine',
-                  validator: (_) => _selectedMedicineId == null ? 'Select a medicine' : null,
+                  validator: (_) =>
+                      _selectedMedicineId == null ? 'Select a medicine' : null,
                   onPicked: (row) {
                     setState(() => _selectedMedicineId = row['id'] as String);
                     _syncDirtyState();
@@ -306,45 +336,65 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
                 TextFormField(
                   controller: _batch,
                   decoration: const InputDecoration(labelText: 'Batch no'),
-                  validator: (value) =>
-                      (value == null || value.trim().isEmpty) ? 'Enter batch number' : null,
+                  validator: (value) => (value == null || value.trim().isEmpty)
+                      ? 'Enter batch number'
+                      : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _expiry,
-                  readOnly: true,
-                  onTap: _pickExpiryDate,
-                  decoration: const InputDecoration(
-                    labelText: 'Expiry date',
-                    suffixIcon: Icon(Icons.calendar_today),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [SlashDdMmYyyyInputFormatter()],
+                  decoration: slashDdMmYyyyInputDecoration(
+                    context,
+                    label: 'Expiry',
                   ),
-                  validator: (_) => _expiryDate == null ? 'Pick expiry date' : null,
+                  validator: (value) => slashDdMmYyyyExpiryError(
+                    value ?? '',
+                    DateTime(
+                      DateTime.now().year,
+                      DateTime.now().month,
+                      DateTime.now().day,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _qty,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}$')),
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d*\.?\d{0,2}$'),
+                    ),
                   ],
                   decoration: const InputDecoration(labelText: 'Qty base unit'),
                   validator: (value) {
                     final qty = num.tryParse(value ?? '');
-                    if (qty == null || qty <= 0) return 'Enter quantity greater than 0';
+                    if (qty == null || qty <= 0) {
+                      return 'Enter quantity greater than 0';
+                    }
                     return null;
                   },
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _cost,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}$')),
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d*\.?\d{0,2}$'),
+                    ),
                   ],
                   decoration: const InputDecoration(labelText: 'Unit cost'),
                   validator: (value) {
                     final cost = num.tryParse(value ?? '');
-                    if (cost == null || cost < 0) return 'Enter a valid unit cost';
+                    if (cost == null || cost < 0) {
+                      return 'Enter a valid unit cost';
+                    }
                     return null;
                   },
                 ),

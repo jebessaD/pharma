@@ -63,8 +63,8 @@ class _ExpiryHubPageState extends ConsumerState<ExpiryHubPage>
   @override
   Widget build(BuildContext context) {
     return PharmacyHubScaffold(
-      title: 'Expiry',
-      subtitle: 'Near-due and past-due batches',
+      title: '',
+      subtitle: null,
       tabController: _tabController,
       tabs: const [
         Tab(text: 'Near expiry', icon: Icon(Icons.event_busy_rounded)),

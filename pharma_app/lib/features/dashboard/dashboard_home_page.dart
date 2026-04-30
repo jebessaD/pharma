@@ -6,8 +6,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/branches_list_provider.dart';
+import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/app_error_state.dart';
 
 class DashboardHomePage extends ConsumerStatefulWidget {
@@ -23,6 +25,7 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
   Map<String, dynamic>? _metrics;
   int _unread = 0;
   DateTime? _lastUpdated;
+  final Set<String> _selectedCategoryIds = <String>{};
 
   @override
   void initState() {
@@ -47,13 +50,7 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
       _error = null;
     });
     try {
-      final m = await Supabase.instance.client.rpc(
-        'dashboard_metrics',
-        params: {
-          'p_team_id': teamId,
-          'p_branch_id': branchId,
-        },
-      );
+      final m = await _loadDashboardMetrics(teamId, branchId);
       final unreadRows = await Supabase.instance.client
           .from('notifications')
           .select('id')
@@ -86,12 +83,42 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
         .toList();
   }
 
+  Future<dynamic> _loadDashboardMetrics(String teamId, String branchId) async {
+    final params = {
+      'p_team_id': teamId,
+      'p_branch_id': branchId,
+      'p_category_ids': _selectedCategoryIds.isEmpty
+          ? null
+          : _selectedCategoryIds.toList(growable: false),
+    };
+    try {
+      return await Supabase.instance.client.rpc(
+        'dashboard_metrics',
+        params: params,
+      );
+    } on PostgrestException catch (e) {
+      final text = '${e.message} ${e.details ?? ''} ${e.hint ?? ''}'
+          .toLowerCase();
+      final expectsOldSignature =
+          text.contains('p_category_ids') || text.contains('function');
+      if (!expectsOldSignature || _selectedCategoryIds.isNotEmpty) rethrow;
+      final legacyParams = Map<String, dynamic>.from(params)
+        ..remove('p_category_ids');
+      return Supabase.instance.client.rpc(
+        'dashboard_metrics',
+        params: legacyParams,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen(selectedBranchIdProvider, (previous, next) => _load());
-    final teamId = ref.watch(pharmacyProfileProvider).asData?.value?['team_id'] as String?;
+    final teamId =
+        ref.watch(pharmacyProfileProvider).asData?.value?['team_id'] as String?;
     final branchId = ref.watch(selectedBranchIdProvider);
     final branchesAsync = ref.watch(branchesListProvider(teamId ?? ''));
+    final categoriesAsync = ref.watch(activeBranchMedicineCategoriesProvider);
 
     final branchLabel = teamId == null || teamId.isEmpty
         ? '—'
@@ -111,153 +138,140 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Overview'),
-        actions: [
-          if (_unread > 0)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: TextButton.icon(
-                onPressed: () => context.go('/pharmacy/notifications'),
-                icon: Badge(
-                  label: Text('$_unread'),
-                  child: const Icon(Icons.notifications_outlined),
-                ),
-                label: const Text('Alerts'),
-              ),
-            ),
-        ],
+        title: Text(
+          'Overview',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.2,
+          ),
+        ),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? AppErrorState(
-                  message: _error!,
-                  onRetry: () {
-                    _load();
-                  },
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView(
-                    padding: const EdgeInsets.all(24),
+          ? AppErrorState(
+              message: _error!,
+              onRetry: _load,
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final gridColumns = constraints.maxWidth >= 960
+                      ? 3
+                      : (constraints.maxWidth >= 360 ? 2 : 1);
+                  return ListView(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
                     children: [
-                      Text(
+                      _heroHeader(
+                        context,
                         branchLabel,
-                        style: Theme.of(context).textTheme.titleMedium,
+                        categoriesAsync.value
+                                ?.map((row) {
+                                  final id = (row['id'] as String? ?? '').trim();
+                                  final name = (row['name'] as String? ?? '').trim();
+                                  if (id.isEmpty || name.isEmpty) return null;
+                                  return {'id': id, 'name': name};
+                                })
+                                .whereType<Map<String, String>>()
+                                .toList() ??
+                            const <Map<String, String>>[],
                       ),
-                      Text(
-                        'Snapshot for this branch. Open Report tables for full grids, filters, and CSV copy.',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 16),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          FilledButton.tonalIcon(
-                            onPressed: () => context.go('/pharmacy/pos'),
-                            icon: const Icon(Icons.point_of_sale_outlined),
-                            label: const Text('POS'),
-                          ),
-                          FilledButton.tonalIcon(
-                            onPressed: () => context.go('/pharmacy/stock-in'),
-                            icon: const Icon(Icons.add_shopping_cart_outlined),
-                            label: const Text('Stock in'),
-                          ),
-                          FilledButton.tonalIcon(
-                            onPressed: () => context.go('/pharmacy/reports'),
-                            icon: const Icon(Icons.table_chart_outlined),
-                            label: const Text('Report tables'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      if (_lastUpdated != null)
-                        Text(
-                          'Last updated: ${DateFormat.yMMMd().add_jm().format(_lastUpdated!.toLocal())}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
+                      _quickActions(context),
+                      const SizedBox(height: 14),
                       if (_metrics != null) ...[
-                        _tile(
-                          context,
-                          'Today sales total',
-                          _money(_metrics!['today_sales_total']),
-                          route: '/pharmacy/reports/sales_summary',
-                        ),
-                        _tile(
-                          context,
-                          'Today sales count',
-                          _formatMetric(_metrics!['today_sales_count'], decimals: 0),
-                          route: '/pharmacy/reports/sales_summary',
-                        ),
-                        _tile(
-                          context,
-                          'Today gross profit',
-                          _money(_metrics!['today_profit_total'] ?? 0),
-                          route: '/pharmacy/reports/profit_summary',
-                        ),
-                        _tile(
-                          context,
-                          'Sales (last 7 days)',
-                          _money(_metrics!['sales_7d_total'] ?? 0),
-                          route: '/pharmacy/reports/sales_summary',
-                        ),
-                        _tile(
-                          context,
-                          'Sales (month to date)',
-                          _money(_metrics!['sales_mtd_total'] ?? 0),
-                          route: '/pharmacy/reports/sales_summary',
-                        ),
-                        _tile(
-                          context,
-                          'Stock value at cost',
-                          _money(_metrics!['stock_value_at_cost'] ?? 0),
-                          subtitle: 'Qty × medicine purchase price',
-                          route: '/pharmacy/reports/stock_balance',
-                        ),
-                        _tile(
-                          context,
-                          'Low stock SKUs',
-                          _formatMetric(
-                            _metrics!['low_stock_count'],
-                            decimals: 0,
-                          ),
-                          route: '/pharmacy/stock?tab=low',
-                        ),
-                        _tile(
-                          context,
-                          'Near expiry batches',
-                          _formatMetric(
-                            _metrics!['near_expiry_count'],
-                            decimals: 0,
-                          ),
-                          route: '/pharmacy/expiry?tab=near',
-                        ),
-                        _tile(
-                          context,
-                          'Expired batches',
-                          _formatMetric(
-                            _metrics!['expired_count'],
-                            decimals: 0,
-                          ),
-                          route: '/pharmacy/expiry?tab=expired',
-                        ),
+                        _sectionTitle(context, 'Sales snapshot'),
                         const SizedBox(height: 8),
-                        Text(
-                          'Top sales by medicine (7 days)',
-                          style: Theme.of(context).textTheme.titleSmall,
+                        _metricGrid(
+                          context,
+                          gridColumns: gridColumns,
+                          children: [
+                            _metricCard(
+                              context,
+                              title: 'Today sales total',
+                              value: _money(_metrics!['today_sales_total']),
+                              route: '/pharmacy/reports/sales_summary',
+                              icon: Icons.payments_rounded,
+                            ),
+                            _metricCard(
+                              context,
+                              title: 'Today sales count',
+                              value: _formatMetric(_metrics!['today_sales_count'], decimals: 0),
+                              route: '/pharmacy/reports/sales_summary',
+                              icon: Icons.receipt_long_rounded,
+                            ),
+                            _metricCard(
+                              context,
+                              title: 'Today gross profit',
+                              value: _money(_metrics!['today_profit_total'] ?? 0),
+                              route: '/pharmacy/reports/profit_summary',
+                              icon: Icons.trending_up_rounded,
+                            ),
+                            _metricCard(
+                              context,
+                              title: 'Sales (last 7 days)',
+                              value: _money(_metrics!['sales_7d_total'] ?? 0),
+                              route: '/pharmacy/reports/sales_summary',
+                              icon: Icons.view_week_rounded,
+                            ),
+                            _metricCard(
+                              context,
+                              title: 'Sales (month to date)',
+                              value: _money(_metrics!['sales_mtd_total'] ?? 0),
+                              route: '/pharmacy/reports/sales_summary',
+                              icon: Icons.calendar_month_rounded,
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 14),
+                        _sectionTitle(context, 'Inventory health'),
+                        const SizedBox(height: 8),
+                        _metricGrid(
+                          context,
+                          gridColumns: gridColumns,
+                          children: [
+                            _metricCard(
+                              context,
+                              title: 'Stock value at cost',
+                              value: _money(_metrics!['stock_value_at_cost'] ?? 0),
+                              subtitle: 'Qty × medicine purchase price',
+                              route: '/pharmacy/reports/stock_balance',
+                              icon: Icons.inventory_2_rounded,
+                            ),
+                            _metricCard(
+                              context,
+                              title: 'Low stock SKUs',
+                              value: _formatMetric(_metrics!['low_stock_count'], decimals: 0),
+                              route: '/pharmacy/stock?tab=low',
+                              icon: Icons.warning_amber_rounded,
+                            ),
+                            _metricCard(
+                              context,
+                              title: 'Near expiry batches',
+                              value: _formatMetric(_metrics!['near_expiry_count'], decimals: 0),
+                              route: '/pharmacy/expiry?tab=near',
+                              icon: Icons.event_note_rounded,
+                            ),
+                            _metricCard(
+                              context,
+                              title: 'Expired batches',
+                              value: _formatMetric(_metrics!['expired_count'], decimals: 0),
+                              route: '/pharmacy/expiry?tab=expired',
+                              icon: Icons.event_busy_rounded,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        _sectionTitle(context, 'Top sales by medicine (7 days)'),
+                        const SizedBox(height: 8),
                         Card(
+                          clipBehavior: Clip.antiAlias,
                           child: _topSellersBody(context, _metrics!['top_sellers_7d']),
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Sales by staff (7 days)',
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 14),
+                        _sectionTitle(context, 'Sales by staff (7 days)'),
+                        const SizedBox(height: 8),
                         Card(
                           clipBehavior: Clip.antiAlias,
                           child: InkWell(
@@ -267,8 +281,224 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
                         ),
                       ],
                     ],
+                  );
+                },
+              ),
+            ),
+    );
+  }
+
+  Widget _heroHeader(
+    BuildContext context,
+    String branchLabel,
+    List<Map<String, String>> categoryOptions,
+  ) {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      branchLabel,
+                      style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Snapshot for this branch.',
+                      style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              if (_unread > 0)
+                FilledButton.tonalIcon(
+                  onPressed: () => context.go('/pharmacy/notifications'),
+                  icon: Badge(label: Text('$_unread'), child: const Icon(Icons.notifications_outlined)),
+                  label: const Text('Alerts'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _lastUpdated == null ? 'Not updated yet' : 'Last updated: ${formatDdMmYyyyHm(_lastUpdated)}',
+            style: t.textTheme.labelMedium?.copyWith(color: cs.onSurfaceVariant),
+          ),
+          if (categoryOptions.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Medicine categories'),
+              subtitle: Text(
+                _selectedCategoryIds.isEmpty
+                    ? 'All categories'
+                    : '${_selectedCategoryIds.length} selected',
+              ),
+              trailing: const Icon(Icons.checklist_rounded),
+              onTap: () async {
+                final selected = await _pickCategoryIds(
+                  categoryOptions,
+                  _selectedCategoryIds,
+                );
+                if (selected == null) return;
+                setState(() {
+                  _selectedCategoryIds
+                    ..clear()
+                    ..addAll(selected);
+                });
+                _load();
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<Set<String>?> _pickCategoryIds(
+    List<Map<String, String>> options,
+    Set<String> selected,
+  ) async {
+    return showModalBottomSheet<Set<String>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final temp = Set<String>.from(selected);
+        return StatefulBuilder(
+          builder: (context, setModalState) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  title: const Text('Select categories'),
+                  trailing: TextButton(
+                    onPressed: () => setModalState(temp.clear),
+                    child: const Text('Clear'),
                   ),
                 ),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final option in options)
+                        CheckboxListTile(
+                          value: temp.contains(option['id']),
+                          title: Text(option['name'] ?? ''),
+                          onChanged: (checked) {
+                            setModalState(() {
+                              final id = option['id'];
+                              if (id == null) return;
+                              if (checked == true) {
+                                temp.add(id);
+                              } else {
+                                temp.remove(id);
+                              }
+                            });
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () => Navigator.pop(ctx, temp),
+                          child: const Text('Apply'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _quickActions(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        FilledButton.tonalIcon(
+          onPressed: () => context.go('/pharmacy/pos'),
+          icon: const Icon(Icons.point_of_sale_outlined),
+          label: const Text('POS'),
+        ),
+        FilledButton.tonalIcon(
+          onPressed: () => context.go('/pharmacy/stock-in'),
+          icon: const Icon(Icons.add_shopping_cart_outlined),
+          label: const Text('Stock in'),
+        ),
+        FilledButton.tonalIcon(
+          onPressed: () => context.go('/pharmacy/reports'),
+          icon: const Icon(Icons.table_chart_outlined),
+          label: const Text('Report tables'),
+        ),
+      ],
+    );
+  }
+
+  Widget _sectionTitle(BuildContext context, String title) {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 18,
+          decoration: BoxDecoration(color: cs.primary, borderRadius: BorderRadius.circular(2)),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _metricGrid(BuildContext context, {required int gridColumns, required List<Widget> children}) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: children.length,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: gridColumns,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: gridColumns >= 3 ? 1.45 : (gridColumns == 2 ? 1.25 : 2.4),
+      ),
+      itemBuilder: (context, index) => children[index],
     );
   }
 
@@ -299,10 +529,7 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
         for (var i = 0; i < rows.length; i++)
           ListTile(
             dense: true,
-            leading: CircleAvatar(
-              radius: 14,
-              child: Text('${i + 1}'),
-            ),
+            leading: CircleAvatar(radius: 14, child: Text('${i + 1}')),
             title: Text(rows[i]['name'] as String? ?? ''),
             subtitle: Text(
               '${_formatMetric(rows[i]['sale_count'], decimals: 0)} sales',
@@ -310,7 +537,7 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
             ),
             trailing: Text(
               _money(rows[i]['total']),
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
           ),
         Padding(
@@ -318,8 +545,8 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
           child: Text(
             'Tap for full date range in Report tables',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.primary,
-                ),
+              color: Theme.of(context).colorScheme.primary,
+            ),
           ),
         ),
       ],
@@ -340,14 +567,11 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
         for (var i = 0; i < rows.length; i++)
           ListTile(
             dense: true,
-            leading: CircleAvatar(
-              radius: 14,
-              child: Text('${i + 1}'),
-            ),
+            leading: CircleAvatar(radius: 14, child: Text('${i + 1}')),
             title: Text(rows[i]['name'] as String? ?? ''),
             trailing: Text(
               _money(rows[i]['revenue']),
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
           ),
       ],
@@ -367,19 +591,85 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
     return v.toString();
   }
 
-  Widget _tile(
-    BuildContext context,
-    String title,
-    String value, {
+  Widget _metricCard(
+    BuildContext context, {
+    required String title,
+    required String value,
+    required IconData icon,
     String? subtitle,
     String? route,
   }) {
-    return Card(
-      child: ListTile(
-        title: Text(title),
-        subtitle: subtitle == null ? null : Text(subtitle),
-        trailing: Text(value, style: Theme.of(context).textTheme.titleMedium),
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    return Material(
+      color: cs.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
         onTap: route == null ? null : () => context.go(route),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: cs.primaryContainer.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(icon, size: 19, color: cs.primary),
+                    ),
+                    const Spacer(),
+                    if (route != null)
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: cs.onSurfaceVariant,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.textTheme.labelLarge?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

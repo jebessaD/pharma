@@ -1,13 +1,17 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../providers/app_update_gate_provider.dart';
+import '../providers/connectivity_provider.dart';
+import '../providers/pharmacy_redirect_cache_provider.dart';
 import '../providers.dart';
 import '../../features/audit/activity_log_page.dart';
 import '../../features/auth/login_page.dart';
+import '../../features/auth/signup_page.dart';
 import '../../features/expiry/expiry_hub_page.dart';
 import '../../features/home/pharmacy_home_page.dart';
-import '../../features/inventory/stock_adjust_page.dart';
 import '../../features/inventory/stock_hub_page.dart';
 import '../../features/inventory/stock_in_page.dart';
 import '../../features/inventory/stock_movements_page.dart';
@@ -29,25 +33,62 @@ import '../../features/reports/report_viewer_page.dart';
 import '../../features/reports/reports_home_page.dart';
 import '../../features/staff/create_staff_page.dart';
 import '../../features/staff/edit_staff_page.dart';
+import '../../features/shell/auth_callback_page.dart';
+import '../../features/shell/billing_blocked_page.dart';
+import '../../features/shell/animated_splash_page.dart';
 import '../../features/shell/landing_page.dart';
+import '../../features/shell/platform_messages_page.dart';
 import '../../features/shell/team_suspended_page.dart';
+import '../../features/shell/trial_ended_page.dart';
+import '../../features/shell/update_required_page.dart';
 import '../../features/team/create_branch_page.dart';
 import '../../features/team/edit_branch_page.dart';
 import '../../features/team/organization_hub_page.dart';
 import '../../features/dashboard/dashboard_home_page.dart';
 
 final goRouterProvider = Provider<GoRouter>((ref) {
-  final refresh = ref.read(supabaseAuthRefreshProvider);
+  final refresh = Listenable.merge([
+    ref.read(supabaseAuthRefreshProvider),
+    ref.read(appUpdateRefreshProvider),
+  ]);
   return GoRouter(
-    initialLocation: '/',
+    initialLocation: '/splash',
     refreshListenable: refresh,
     redirect: (context, state) async {
       final session = Supabase.instance.client.auth.currentSession;
       final loc = state.matchedLocation;
       final userId = Supabase.instance.client.auth.currentUser?.id;
+      final isOnline = ref.read(connectivityProvider).value ?? true;
+
+      // Redirect precedence: force update → auth → team suspended → billing block
+      // → trial ended → role allowlists.
+      if (loc == '/update-required') {
+        await ref.read(appUpdateGateNotifierProvider.notifier).ensureHydrated();
+        final ug = ref.read(appUpdateGateNotifierProvider);
+        if (ug?.blocked != true) {
+          return session != null ? '/pharmacy/home' : '/login';
+        }
+        return null;
+      }
+
+      await ref.read(appUpdateGateNotifierProvider.notifier).ensureHydrated();
+      final ug = ref.read(appUpdateGateNotifierProvider);
+      if (ug?.blocked == true) return '/update-required';
+
+      bool isConnectivityRelated(Object error) {
+        final lower = error.toString().toLowerCase();
+        return lower.contains('socket') ||
+            lower.contains('network') ||
+            lower.contains('failed host lookup') ||
+            lower.contains('connection') ||
+            lower.contains('timed out') ||
+            lower.contains('clientexception') ||
+            lower.contains('failed to fetch');
+      }
 
       bool isAllowedForRole(String role, String path) {
         const adminAllowed = <String>['/pharmacy'];
+        const ownerAllowed = <String>['/pharmacy'];
         const pharmacistAllowed = <String>[
           '/pharmacy/home',
           '/pharmacy/pos',
@@ -55,71 +96,132 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           '/pharmacy/stock',
           '/pharmacy/low-stock',
           '/pharmacy/stock-in',
-          '/pharmacy/adjust-stock',
           '/pharmacy/stock-movements',
           '/pharmacy/expiry',
           '/pharmacy/dashboard',
           '/pharmacy/reports',
           '/pharmacy/receipt',
+          '/pharmacy/platform-messages',
         ];
         const cashierAllowed = <String>[
           '/pharmacy/home',
           '/pharmacy/pos',
           '/pharmacy/receipt',
+          '/pharmacy/platform-messages',
         ];
         final allowed = switch (role) {
           'admin' => adminAllowed,
+          'owner' => ownerAllowed,
           'pharmacist' => pharmacistAllowed,
           'cashier' => cashierAllowed,
+          'seller' => cashierAllowed,
           _ => const <String>[],
         };
         return allowed.any((prefix) => path.startsWith(prefix));
       }
 
+      if (loc == '/trial-ended' && session == null) return '/login';
+      if (loc == '/billing-blocked' && session == null) return '/login';
+      if (loc == '/signup' && session != null) return '/pharmacy/home';
+
+      if (loc == '/trial-ended' && session != null && userId != null) {
+        try {
+          await ref
+              .read(pharmacyRedirectCacheProvider.notifier)
+              .hydrate(userId);
+          final g = ref.read(pharmacyRedirectCacheProvider);
+          if (g != null && !g.shouldShowTrialEndedRoute) {
+            return '/pharmacy/home';
+          }
+        } catch (_) {
+          /* offline: allow staying on trial page */
+        }
+      }
+
+      if (loc == '/billing-blocked' && session != null && userId != null) {
+        try {
+          await ref
+              .read(pharmacyRedirectCacheProvider.notifier)
+              .hydrate(userId);
+          final g = ref.read(pharmacyRedirectCacheProvider);
+          if (g != null && !g.shouldShowBillingBlockedRoute) {
+            return '/pharmacy/home';
+          }
+        } catch (_) {
+          /* offline */
+        }
+      }
+
       if (loc.startsWith('/admin')) {
         if (session == null) return '/login';
-        final admin = await Supabase.instance.client
-            .from('platform_admins')
-            .select('is_active')
-            .eq('id', userId ?? '')
-            .maybeSingle();
-        final isActiveAdmin = admin?['is_active'] == true;
-        if (!isActiveAdmin) return '/pharmacy/home';
+        try {
+          final admin = await Supabase.instance.client
+              .from('platform_admins')
+              .select('is_active')
+              .eq('id', userId ?? '')
+              .maybeSingle();
+          final isActiveAdmin = admin?['is_active'] == true;
+          if (!isActiveAdmin) return '/pharmacy/home';
+        } catch (e) {
+          if (!isOnline || isConnectivityRelated(e)) return '/pharmacy/home';
+          rethrow;
+        }
         return null;
       }
 
       if (loc.startsWith('/pharmacy')) {
         if (session == null) return '/login';
-        final profile = await Supabase.instance.client
-            .from('profiles')
-            .select('role, team_id, is_active')
-            .eq('id', userId ?? '')
-            .maybeSingle();
-        final role = profile?['role'] as String?;
-        final isActiveUser = profile?['is_active'] != false;
-        final teamId = profile?['team_id'] as String?;
-        if (!isActiveUser) return '/login';
-        if (teamId != null) {
-          final team = await Supabase.instance.client
-              .from('teams')
-              .select('status')
-              .eq('id', teamId)
-              .maybeSingle();
-          if (team?['status'] == 'suspended') return '/suspended';
+        try {
+          await ref
+              .read(pharmacyRedirectCacheProvider.notifier)
+              .hydrate(userId);
+          final gate = ref.read(pharmacyRedirectCacheProvider);
+          if (gate == null) return '/login';
+          if (!gate.isActiveUser) return '/login';
+          if (gate.teamId != null && gate.teamStatus == 'suspended') {
+            return '/suspended';
+          }
+          if (gate.teamId != null && gate.shouldShowBillingBlockedRoute) {
+            return '/billing-blocked';
+          }
+          if (gate.teamId != null && gate.shouldShowTrialEndedRoute) {
+            return '/trial-ended';
+          }
+          if (gate.role != null && !isAllowedForRole(gate.role!, loc)) {
+            return '/pharmacy/home';
+          }
+        } catch (e) {
+          if (!isOnline || isConnectivityRelated(e)) return null;
+          rethrow;
         }
-        if (role != null && !isAllowedForRole(role, loc)) return '/pharmacy/home';
         return null;
       }
 
+      if (loc == '/splash') return null;
+      if (loc == '/' && session != null) return '/pharmacy/home';
+
+      // PKCE email links open pharmaapp://auth/callback → path /callback.
+      // Stay on callback while session is being exchanged, then leave.
+      if (loc == '/callback') {
+        return session != null ? '/pharmacy/home' : null;
+      }
+
+      // After deep-link email verification, supabase_flutter exchanges the
+      // PKCE code and fires onAuthStateChange. Redirect authenticated users
+      // away from auth screens automatically.
+      if ((loc == '/login' || loc == '/signup') && session != null) {
+        return '/pharmacy/home';
+      }
       if (loc == '/login') return null;
+      if (loc == '/signup') return null;
       if (loc == '/suspended') return null;
+      if (loc == '/trial-ended') return null;
+      if (loc == '/billing-blocked') return null;
       return null;
     },
     routes: [
-      GoRoute(
-        path: '/',
-        builder: (context, state) => const LandingPage(),
-      ),
+      GoRoute(path: '/splash', builder: (context, state) => const AnimatedSplashPage()),
+      GoRoute(path: '/', builder: (context, state) => const LandingPage()),
       GoRoute(
         path: '/admin/teams',
         builder: (context, state) => const TeamListPage(),
@@ -137,13 +239,27 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           ),
         ],
       ),
+      GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
       GoRoute(
-        path: '/login',
-        builder: (context, state) => const LoginPage(),
+        path: '/callback',
+        builder: (context, state) => const AuthCallbackPage(),
       ),
+      GoRoute(path: '/signup', builder: (context, state) => const SignupPage()),
       GoRoute(
         path: '/suspended',
         builder: (context, state) => const TeamSuspendedPage(),
+      ),
+      GoRoute(
+        path: '/trial-ended',
+        builder: (context, state) => const TrialEndedPage(),
+      ),
+      GoRoute(
+        path: '/billing-blocked',
+        builder: (context, state) => const BillingBlockedPage(),
+      ),
+      GoRoute(
+        path: '/update-required',
+        builder: (context, state) => const UpdateRequiredPage(),
       ),
       GoRoute(
         path: '/pharmacy',
@@ -153,208 +269,216 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           ShellRoute(
             builder: (context, state, child) => PharmacyShell(child: child),
             routes: [
-          GoRoute(
-            path: 'home',
-            builder: (context, state) => const PharmacyHomePage(),
-          ),
-          GoRoute(
-            path: 'team-profile',
-            redirect: (context, state) => '/pharmacy/organization?tab=profile',
-          ),
-          GoRoute(
-            path: 'organization',
-            redirect: (context, state) async {
-              final user = Supabase.instance.client.auth.currentUser;
-              if (user == null) return '/login';
-              final profile = await Supabase.instance.client
-                  .from('profiles')
-                  .select('role')
-                  .eq('id', user.id)
-                  .maybeSingle();
-              final role = profile?['role'] as String?;
-              if (role != 'admin') return '/pharmacy/home';
-              return null;
-            },
-            builder: (context, state) {
-              final tab = state.uri.queryParameters['tab'];
-              final initial = switch (tab) {
-                'branches' => OrganizationHubTab.branches,
-                'staff' => OrganizationHubTab.staff,
-                _ => OrganizationHubTab.profile,
-              };
-              return OrganizationHubPage(initialTab: initial);
-            },
-          ),
-          GoRoute(
-            path: 'staff',
-            redirect: (context, state) async {
-              final user = Supabase.instance.client.auth.currentUser;
-              if (user == null) return '/login';
-              final profile = await Supabase.instance.client
-                  .from('profiles')
-                  .select('role')
-                  .eq('id', user.id)
-                  .maybeSingle();
-              final role = profile?['role'] as String?;
-              if (role != 'admin') return '/pharmacy/home';
-              if (state.matchedLocation == '/pharmacy/staff') {
-                return '/pharmacy/organization?tab=staff';
-              }
-              return null;
-            },
-            routes: [
               GoRoute(
-                path: 'new',
-                builder: (context, state) => const CreateStaffPage(),
+                path: 'home',
+                builder: (context, state) => const PharmacyHomePage(),
               ),
               GoRoute(
-                path: ':staffId/edit',
-                builder: (context, state) =>
-                    EditStaffPage(staffId: state.pathParameters['staffId']!),
-              ),
-            ],
-          ),
-          GoRoute(
-            path: 'branches',
-            redirect: (context, state) {
-              if (state.matchedLocation == '/pharmacy/branches') {
-                return '/pharmacy/organization?tab=branches';
-              }
-              return null;
-            },
-            routes: [
-              GoRoute(
-                path: 'new',
-                builder: (context, state) => const CreateBranchPage(),
+                path: 'team-profile',
+                redirect: (context, state) =>
+                    '/pharmacy/organization?tab=profile',
               ),
               GoRoute(
-                path: ':branchId/edit',
-                builder: (context, state) =>
-                    EditBranchPage(branchId: state.pathParameters['branchId']!),
-              ),
-            ],
-          ),
-          GoRoute(
-            path: 'medicines',
-            builder: (context, state) => const MedicineListPage(),
-            routes: [
-              GoRoute(
-                path: 'new',
-                builder: (context, state) => const CreateMedicinePage(),
-              ),
-              GoRoute(
-                path: ':medicineId/edit',
-                builder: (context, state) => EditMedicinePage(
-                  medicineId: state.pathParameters['medicineId']!,
-                ),
-              ),
-              GoRoute(
-                path: ':medicineId',
+                path: 'organization',
+                redirect: (context, state) async {
+                  final user = Supabase.instance.client.auth.currentUser;
+                  if (user == null) return '/login';
+                  await ref
+                      .read(pharmacyRedirectCacheProvider.notifier)
+                      .hydrate(user.id);
+                  final role = ref.read(pharmacyRedirectCacheProvider)?.role;
+                  if (role != 'admin' && role != 'owner') {
+                    return '/pharmacy/home';
+                  }
+                  return null;
+                },
                 builder: (context, state) {
-                  final id = state.pathParameters['medicineId']!;
-                  return MedicineDetailPage(medicineId: id);
+                  final tab = state.uri.queryParameters['tab'];
+                  final initial = switch (tab) {
+                    'branches' => OrganizationHubTab.branches,
+                    'staff' => OrganizationHubTab.staff,
+                    _ => OrganizationHubTab.profile,
+                  };
+                  return OrganizationHubPage(initialTab: initial);
                 },
               ),
-            ],
-          ),
-          GoRoute(
-            path: 'low-stock',
-            redirect: (context, state) => '/pharmacy/stock?tab=low',
-          ),
-          GoRoute(
-            path: 'stock',
-            builder: (context, state) {
-              final tab = state.uri.queryParameters['tab'];
-              final initial = tab == 'low' ? StockHubTab.low : StockHubTab.balances;
-              return StockHubPage(initialTab: initial);
-            },
-          ),
-          GoRoute(
-            path: 'stock-in',
-            builder: (context, state) {
-              final bulk = state.uri.queryParameters['tab'] == 'bulk';
-              return StockInPage(openBulkTab: bulk);
-            },
-          ),
-          GoRoute(
-            path: 'bulk-stock-in',
-            redirect: (context, state) => '/pharmacy/stock-in?tab=bulk',
-          ),
-          GoRoute(
-            path: 'stock-movements',
-            builder: (context, state) => const StockMovementsPage(),
-          ),
-          GoRoute(
-            path: 'adjust-stock',
-            builder: (context, state) => const StockAdjustPage(),
-          ),
-          GoRoute(
-            path: 'pos',
-            builder: (context, state) => const PosPage(),
-          ),
-          GoRoute(
-            path: 'receipt/:saleId',
-            builder: (context, state) {
-              final id = state.pathParameters['saleId']!;
-              return SaleReceiptPage(saleId: id);
-            },
-          ),
-          GoRoute(
-            path: 'expiry/near',
-            redirect: (context, state) => '/pharmacy/expiry?tab=near',
-          ),
-          GoRoute(
-            path: 'expiry/expired',
-            redirect: (context, state) => '/pharmacy/expiry?tab=expired',
-          ),
-          GoRoute(
-            path: 'expiry',
-            builder: (context, state) {
-              final tab = state.uri.queryParameters['tab'];
-              final initial = tab == 'expired' ? ExpiryHubTab.expired : ExpiryHubTab.near;
-              return ExpiryHubPage(initialTab: initial);
-            },
-          ),
-          GoRoute(
-            path: 'notifications',
-            builder: (context, state) => const NotificationListPage(),
-          ),
-          GoRoute(
-            path: 'suppliers',
-            builder: (context, state) => const SupplierListPage(),
-            routes: [
               GoRoute(
-                path: ':supplierId/edit',
-                builder: (context, state) =>
-                    EditSupplierPage(supplierId: state.pathParameters['supplierId']!),
+                path: 'staff',
+                redirect: (context, state) async {
+                  final user = Supabase.instance.client.auth.currentUser;
+                  if (user == null) return '/login';
+                  await ref
+                      .read(pharmacyRedirectCacheProvider.notifier)
+                      .hydrate(user.id);
+                  final role = ref.read(pharmacyRedirectCacheProvider)?.role;
+                  if (role != 'admin' && role != 'owner') {
+                    return '/pharmacy/home';
+                  }
+                  if (state.uri.path == '/pharmacy/staff') {
+                    return '/pharmacy/organization?tab=staff';
+                  }
+                  return null;
+                },
+                routes: [
+                  GoRoute(
+                    path: 'new',
+                    builder: (context, state) => const CreateStaffPage(),
+                  ),
+                  GoRoute(
+                    path: ':staffId/edit',
+                    builder: (context, state) => EditStaffPage(
+                      staffId: state.pathParameters['staffId']!,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-          GoRoute(
-            path: 'purchases/new',
-            builder: (context, state) => const CreatePurchasePage(),
-          ),
-          GoRoute(
-            path: 'dashboard',
-            builder: (context, state) => const DashboardHomePage(),
-          ),
-          GoRoute(
-            path: 'reports',
-            builder: (context, state) => const ReportsHomePage(),
-            routes: [
               GoRoute(
-                path: ':reportType',
+                path: 'branches',
+                redirect: (context, state) {
+                  if (state.uri.path == '/pharmacy/branches') {
+                    return '/pharmacy/organization?tab=branches';
+                  }
+                  return null;
+                },
+                routes: [
+                  GoRoute(
+                    path: 'new',
+                    builder: (context, state) => const CreateBranchPage(),
+                  ),
+                  GoRoute(
+                    path: ':branchId/edit',
+                    builder: (context, state) => EditBranchPage(
+                      branchId: state.pathParameters['branchId']!,
+                    ),
+                  ),
+                ],
+              ),
+              GoRoute(
+                path: 'medicines',
+                builder: (context, state) => const MedicineListPage(),
+                routes: [
+                  GoRoute(
+                    path: 'new',
+                    builder: (context, state) => const CreateMedicinePage(),
+                  ),
+                  GoRoute(
+                    path: ':medicineId/edit',
+                    builder: (context, state) => EditMedicinePage(
+                      medicineId: state.pathParameters['medicineId']!,
+                    ),
+                  ),
+                  GoRoute(
+                    path: ':medicineId',
+                    builder: (context, state) {
+                      final id = state.pathParameters['medicineId']!;
+                      return MedicineDetailPage(medicineId: id);
+                    },
+                  ),
+                ],
+              ),
+              GoRoute(
+                path: 'low-stock',
+                redirect: (context, state) => '/pharmacy/stock?tab=low',
+              ),
+              GoRoute(
+                path: 'stock',
                 builder: (context, state) {
-                  final t = state.pathParameters['reportType']!;
-                  return ReportViewerPage(reportType: t);
+                  final tab = state.uri.queryParameters['tab'];
+                  final initial = tab == 'low'
+                      ? StockHubTab.low
+                      : StockHubTab.balances;
+                  return StockHubPage(initialTab: initial);
                 },
               ),
-            ],
-          ),
-          GoRoute(
-            path: 'audit',
-            builder: (context, state) => const ActivityLogPage(),
-          ),
+              GoRoute(
+                path: 'stock-in',
+                builder: (context, state) {
+                  final bulk = state.uri.queryParameters['tab'] == 'bulk';
+                  return StockInPage(openBulkTab: bulk);
+                },
+              ),
+              GoRoute(
+                path: 'bulk-stock-in',
+                redirect: (context, state) => '/pharmacy/stock-in?tab=bulk',
+              ),
+              GoRoute(
+                path: 'stock-movements',
+                builder: (context, state) => const StockMovementsPage(),
+              ),
+              GoRoute(
+                path: 'pos',
+                builder: (context, state) => const PosPage(),
+              ),
+              GoRoute(
+                path: 'receipt/:saleId',
+                builder: (context, state) {
+                  final id = state.pathParameters['saleId']!;
+                  return SaleReceiptPage(saleId: id);
+                },
+              ),
+              GoRoute(
+                path: 'expiry/near',
+                redirect: (context, state) => '/pharmacy/expiry?tab=near',
+              ),
+              GoRoute(
+                path: 'expiry/expired',
+                redirect: (context, state) => '/pharmacy/expiry?tab=expired',
+              ),
+              GoRoute(
+                path: 'expiry',
+                builder: (context, state) {
+                  final tab = state.uri.queryParameters['tab'];
+                  final initial = tab == 'expired'
+                      ? ExpiryHubTab.expired
+                      : ExpiryHubTab.near;
+                  return ExpiryHubPage(initialTab: initial);
+                },
+              ),
+              GoRoute(
+                path: 'notifications',
+                builder: (context, state) => const NotificationListPage(),
+              ),
+              GoRoute(
+                path: 'platform-messages',
+                builder: (context, state) => const PlatformMessagesPage(),
+              ),
+              GoRoute(
+                path: 'suppliers',
+                builder: (context, state) => const SupplierListPage(),
+                routes: [
+                  GoRoute(
+                    path: ':supplierId/edit',
+                    builder: (context, state) => EditSupplierPage(
+                      supplierId: state.pathParameters['supplierId']!,
+                    ),
+                  ),
+                ],
+              ),
+              GoRoute(
+                path: 'purchases/new',
+                builder: (context, state) => const CreatePurchasePage(),
+              ),
+              GoRoute(
+                path: 'dashboard',
+                builder: (context, state) => const DashboardHomePage(),
+              ),
+              GoRoute(
+                path: 'reports',
+                builder: (context, state) => const ReportsHomePage(),
+                routes: [
+                  GoRoute(
+                    path: ':reportType',
+                    builder: (context, state) {
+                      final t = state.pathParameters['reportType']!;
+                      return ReportViewerPage(reportType: t);
+                    },
+                  ),
+                ],
+              ),
+              GoRoute(
+                path: 'audit',
+                builder: (context, state) => const ActivityLogPage(),
+              ),
             ],
           ),
         ],

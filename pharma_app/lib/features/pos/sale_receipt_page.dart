@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/app_error_state.dart';
 
 class SaleReceiptPage extends StatefulWidget {
@@ -81,7 +81,9 @@ class _SaleReceiptPageState extends State<SaleReceiptPage> {
         if (prof != null) {
           final fn = (prof['full_name'] as String?)?.trim() ?? '';
           final un = (prof['username'] as String?)?.trim() ?? '';
-          sellerName = fn.isNotEmpty ? fn : (un.isNotEmpty ? un : 'Team member');
+          sellerName = fn.isNotEmpty
+              ? fn
+              : (un.isNotEmpty ? un : 'Team member');
         }
       }
       setState(() {
@@ -102,7 +104,6 @@ class _SaleReceiptPageState extends State<SaleReceiptPage> {
 
   String _buildReceiptText() {
     final s = _sale!;
-    final fmt = DateFormat('yyyy-MM-dd HH:mm');
     final created = s['created_at'];
     DateTime? dt;
     if (created is String) {
@@ -110,7 +111,7 @@ class _SaleReceiptPageState extends State<SaleReceiptPage> {
     }
     final buf = StringBuffer();
     buf.writeln('PHARMACY RECEIPT');
-    if (dt != null) buf.writeln('Date: ${fmt.format(dt.toLocal())}');
+    if (dt != null) buf.writeln('Date: ${formatDdMmYyyyHm(dt)}');
     if (_branchName != null && _branchName!.trim().isNotEmpty) {
       buf.writeln('Branch: ${_branchName!.trim()}');
     }
@@ -169,21 +170,21 @@ class _SaleReceiptPageState extends State<SaleReceiptPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? AppErrorState(message: _error!, onRetry: _load)
-              : _sale == null
-                  ? const Center(child: Text('Nothing to show'))
-                  : ListView(
-                      padding: const EdgeInsets.all(24),
-                      children: [
-                        SelectableText(_buildReceiptText()),
-                        const SizedBox(height: 24),
-                        FilledButton.icon(
-                          onPressed: _share,
-                          icon: const Icon(Icons.share),
-                          label: const Text('Share receipt'),
-                        ),
-                      ],
-                    ),
+          ? AppErrorState(message: _error!, onRetry: _load)
+          : _sale == null
+          ? const Center(child: Text('Nothing to show'))
+          : ListView(
+              padding: const EdgeInsets.all(24),
+              children: [
+                SelectableText(_buildReceiptText()),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: _share,
+                  icon: const Icon(Icons.share),
+                  label: const Text('Share receipt'),
+                ),
+              ],
+            ),
     );
   }
 }

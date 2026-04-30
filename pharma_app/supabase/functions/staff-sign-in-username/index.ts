@@ -7,7 +7,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-type Body = { username?: string; password?: string };
+type Body = {
+  username?: string;
+  password?: string;
+  /** When the same username exists on multiple teams, pass the pharmacy team UUID from a prior session. */
+  team_id?: string;
+};
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -53,11 +58,20 @@ Deno.serve(async (req: Request) => {
   }
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
-  const { data: rows, error: qErr } = await adminClient
+  const teamId =
+    typeof body.team_id === "string" && body.team_id.length > 0
+      ? body.team_id.trim()
+      : null;
+
+  let pq = adminClient
     .from("profiles")
     .select("id")
     .eq("username", normalized)
     .eq("is_active", true);
+  if (teamId != null) {
+    pq = pq.eq("team_id", teamId);
+  }
+  const { data: rows, error: qErr } = await pq;
 
   if (qErr != null) {
     return new Response(qErr.message, {

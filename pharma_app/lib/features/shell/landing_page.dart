@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/app_assets.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
+
 class LandingPage extends StatelessWidget {
   const LandingPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Pharma')),
+      appBar: pharmacyHubAppBar(context, title: 'Pharma Stocks'),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -18,18 +20,38 @@ class LandingPage extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(Icons.local_pharmacy, size: 72, color: cs.primary),
+                Center(
+                  child: Image.asset(
+                    AppAssets.logo,
+                    height: 110,
+                    fit: BoxFit.contain,
+                  ),
+                ),
                 const SizedBox(height: 16),
+                Text(
+                  'Pharma Stocks',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
                 Text(
                   'Ethiopia pharmacy operations',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleLarge,
+                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 32),
                 FilledButton.icon(
-                  onPressed: () => context.go('/login'),
+                  onPressed: () => context.push('/login'),
                   icon: const Icon(Icons.store_outlined),
                   label: const Text('Sign in'),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: () => context.push('/signup'),
+                  icon: const Icon(Icons.person_add_outlined),
+                  label: const Text('Create pharmacy'),
                 ),
               ],
             ),

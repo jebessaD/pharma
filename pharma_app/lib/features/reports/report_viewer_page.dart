@@ -1,14 +1,18 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/form_error_banner.dart';
 
 bool _reportCellLooksLikeUuid(String s) {
@@ -31,10 +35,16 @@ String _reportTableCellDisplayText(String key, Object? value) {
   if (_reportColumnKeyIsId(key) && _reportCellLooksLikeUuid(s)) {
     return '—';
   }
+  final k = key.toLowerCase();
+  if (k.contains('date') || k.endsWith('_at')) {
+    return formatDdMmYyyy(value);
+  }
   return s;
 }
 
-enum _DatePreset { today, last7, last30, custom }
+enum _DatePreset { today, last7, last30, thisYear, custom }
+
+enum _TrendPreset { day, month, year }
 
 class ReportViewerPage extends ConsumerStatefulWidget {
   const ReportViewerPage({super.key, required this.reportType});
@@ -58,16 +68,41 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
   final TextEditingController _thresholdCtl = TextEditingController(text: '90');
   bool _autoRunScheduled = false;
   final TextEditingController _searchCtl = TextEditingController();
+  Timer? _autoRunDebounce;
+  late _TrendPreset _trendPreset;
+  final TextEditingController _minAmountCtl = TextEditingController();
+  final TextEditingController _maxAmountCtl = TextEditingController();
+  String? _selectedSellerId;
+  String? _selectedPaymentMethod;
+  final Set<String> _selectedCategoryIds = <String>{};
+  bool _overridesOnly = false;
+  bool _filtersExpanded = false;
+  List<Map<String, String>> _sellerOptions = const [];
+
+  bool get _isUnifiedSalesReport => widget.reportType == 'sales_unified';
+  bool get _supportsCategoryFilter =>
+      widget.reportType == 'sales_unified' ||
+      widget.reportType == 'stock_balance' ||
+      widget.reportType == 'expiry_status';
 
   bool get _isSalesRangeReport =>
+      widget.reportType == 'sales_unified' ||
       widget.reportType == 'sales_summary' ||
       widget.reportType == 'sales_by_staff' ||
       widget.reportType == 'profit_summary' ||
+      widget.reportType == 'sales_trend' ||
       widget.reportType == 'sales_trend_daily' ||
       widget.reportType == 'sales_trend_monthly' ||
       widget.reportType == 'sales_trend_yearly';
 
   String? get _trendGranularity {
+    if (widget.reportType == 'sales_trend') {
+      return switch (_trendPreset) {
+        _TrendPreset.day => 'day',
+        _TrendPreset.month => 'month',
+        _TrendPreset.year => 'year',
+      };
+    }
     return switch (widget.reportType) {
       'sales_trend_daily' => 'day',
       'sales_trend_monthly' => 'month',
@@ -90,6 +125,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
       case _DatePreset.last30:
         _to = today;
         _from = today.subtract(const Duration(days: 29));
+      case _DatePreset.thisYear:
+        _to = today;
+        _from = DateTime(today.year, 1, 1);
       case _DatePreset.custom:
         break;
     }
@@ -99,6 +137,7 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
   @override
   void initState() {
     super.initState();
+    _trendPreset = _TrendPreset.day;
     if (_isSalesRangeReport) {
       _applyDatePreset(_DatePreset.today);
     } else {
@@ -111,9 +150,20 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
 
   @override
   void dispose() {
+    _autoRunDebounce?.cancel();
     _thresholdCtl.dispose();
     _searchCtl.dispose();
+    _minAmountCtl.dispose();
+    _maxAmountCtl.dispose();
     super.dispose();
+  }
+
+  void _runSoon([Duration delay = const Duration(milliseconds: 250)]) {
+    _autoRunDebounce?.cancel();
+    _autoRunDebounce = Timer(delay, () {
+      if (!mounted || _loading) return;
+      _run();
+    });
   }
 
   void _scheduleInitialLoad() {
@@ -123,6 +173,34 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
       if (!mounted) return;
       _run();
     });
+  }
+
+  Future<void> _ensureSellerOptions(String teamId) async {
+    if (!_isUnifiedSalesReport) return;
+    if (_sellerOptions.isNotEmpty) return;
+    final rows = await Supabase.instance.client
+        .from('profiles')
+        .select('id, full_name, username')
+        .eq('team_id', teamId)
+        .eq('is_active', true)
+        .order('full_name');
+    final options = <Map<String, String>>[];
+    for (final raw in rows as List) {
+      final p = Map<String, dynamic>.from(raw as Map);
+      final id = (p['id'] as String? ?? '').trim();
+      if (id.isEmpty) continue;
+      final fullName = (p['full_name'] as String? ?? '').trim();
+      final username = (p['username'] as String? ?? '').trim();
+      final name = fullName.isNotEmpty
+          ? fullName
+          : (username.isNotEmpty ? username : 'Team member');
+      options.add({'id': id, 'name': name});
+    }
+    _sellerOptions = options;
+    if (_selectedSellerId != null &&
+        !_sellerOptions.any((e) => e['id'] == _selectedSellerId)) {
+      _selectedSellerId = null;
+    }
   }
 
   Future<void> _run() async {
@@ -142,9 +220,45 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
       _error = null;
     });
     try {
+      await _ensureSellerOptions(teamId);
+      final minAmount = num.tryParse(_minAmountCtl.text.trim());
+      final maxAmount = num.tryParse(_maxAmountCtl.text.trim());
+      if (_isUnifiedSalesReport) {
+        if (minAmount != null && minAmount < 0) {
+          setState(() => _error = 'Min amount cannot be negative.');
+          return;
+        }
+        if (maxAmount != null && maxAmount < 0) {
+          setState(() => _error = 'Max amount cannot be negative.');
+          return;
+        }
+        if (minAmount != null && maxAmount != null && minAmount > maxAmount) {
+          setState(() => _error = 'Min amount cannot exceed max amount.');
+          return;
+        }
+      }
       final fmt = DateFormat('yyyy-MM-dd');
       final t = widget.reportType;
-      if (t == 'sales_summary') {
+      if (t == 'sales_unified') {
+        final data = await _rpcWithOptionalCategory(
+          'rpc_report_sales_unified',
+          {
+            'p_team_id': teamId,
+            'p_branch_id': branchId,
+            'p_from': fmt.format(_from),
+            'p_to': fmt.format(_to),
+            'p_sold_by': _selectedSellerId,
+            'p_min_amount': minAmount,
+            'p_max_amount': maxAmount,
+            'p_payment_method': _selectedPaymentMethod,
+            'p_overrides_only': _overridesOnly,
+            'p_category_ids': _selectedCategoryIds.isEmpty
+                ? null
+                : _selectedCategoryIds.toList(growable: false),
+          },
+        );
+        _rows = List<Map<String, dynamic>>.from(data as List);
+      } else if (t == 'sales_summary') {
         final data = await Supabase.instance.client.rpc(
           'rpc_report_sales_summary',
           params: {
@@ -190,24 +304,24 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
         );
         _rows = List<Map<String, dynamic>>.from(data as List);
       } else if (t == 'stock_balance') {
-        final data = await Supabase.instance.client.rpc(
-          'rpc_report_stock_balance',
-          params: {
-            'p_team_id': teamId,
-            'p_branch_id': branchId,
-          },
-        );
+        final data = await _rpcWithOptionalCategory('rpc_report_stock_balance', {
+          'p_team_id': teamId,
+          'p_branch_id': branchId,
+          'p_category_ids': _selectedCategoryIds.isEmpty
+              ? null
+              : _selectedCategoryIds.toList(growable: false),
+        });
         _rows = List<Map<String, dynamic>>.from(data as List);
       } else if (t == 'expiry_status') {
         final thresholdDays = int.tryParse(_thresholdCtl.text) ?? 90;
-        final data = await Supabase.instance.client.rpc(
-          'rpc_report_expiry_status',
-          params: {
-            'p_team_id': teamId,
-            'p_branch_id': branchId,
-            'p_threshold_days': thresholdDays,
-          },
-        );
+        final data = await _rpcWithOptionalCategory('rpc_report_expiry_status', {
+          'p_team_id': teamId,
+          'p_branch_id': branchId,
+          'p_threshold_days': thresholdDays,
+          'p_category_ids': _selectedCategoryIds.isEmpty
+              ? null
+              : _selectedCategoryIds.toList(growable: false),
+        });
         _rows = List<Map<String, dynamic>>.from(data as List);
       } else {
         _error = 'Unknown report type.';
@@ -217,7 +331,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
     } finally {
       if (mounted) {
         setState(() {
-          if (_sortKey != null && _rows.isNotEmpty && !_rows.first.containsKey(_sortKey!)) {
+          if (_sortKey != null &&
+              _rows.isNotEmpty &&
+              !_rows.first.containsKey(_sortKey!)) {
             _sortKey = null;
           }
           _loading = false;
@@ -226,17 +342,77 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
     }
   }
 
+  Future<dynamic> _rpcWithOptionalCategory(
+    String functionName,
+    Map<String, dynamic> params,
+  ) async {
+    try {
+      return await Supabase.instance.client.rpc(functionName, params: params);
+    } on PostgrestException catch (e) {
+      final text = '${e.message} ${e.details ?? ''} ${e.hint ?? ''}'
+          .toLowerCase();
+      final expectsOldSignature =
+          text.contains('p_category_ids') || text.contains('function');
+      if (!expectsOldSignature || _selectedCategoryIds.isNotEmpty) rethrow;
+      final legacyParams = Map<String, dynamic>.from(params)
+        ..remove('p_category_ids');
+      return Supabase.instance.client.rpc(functionName, params: legacyParams);
+    }
+  }
+
   Future<void> _exportCsv() async {
     if (_rows.isEmpty) return;
-    final keys = _rows.first.keys.toList();
+    final keys = _rows.first.keys.where((k) => k != 'sale_id').toList();
     final header = keys.join(',');
-    final lines = _rows.map((row) => keys.map((k) => '${row[k] ?? ''}').join(',')).toList();
-    await Clipboard.setData(ClipboardData(text: ([header, ...lines]).join('\n')));
+    final lines = _rows
+        .map((row) => keys.map((k) => '${row[k] ?? ''}').join(','))
+        .toList();
+    await Clipboard.setData(
+      ClipboardData(text: ([header, ...lines]).join('\n')),
+    );
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('CSV copied to clipboard')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('CSV copied to clipboard')));
     }
+  }
+
+  List<Map<String, dynamic>> _appendUnifiedSummaryRow(
+    List<Map<String, dynamic>> rows,
+  ) {
+    if (!_isUnifiedSalesReport || rows.isEmpty) return rows;
+    num qtySum = 0;
+    num lineSum = 0;
+    num discountSum = 0;
+    num grandSum = 0;
+    final seenSaleIds = <String>{};
+    for (final r in rows) {
+      qtySum += (r['qty'] as num?) ?? 0;
+      lineSum += (r['line_total'] as num?) ?? 0;
+      final saleId = '${r['sale_id'] ?? ''}';
+      if (saleId.isNotEmpty && seenSaleIds.add(saleId)) {
+        discountSum += (r['discount_total'] as num?) ?? 0;
+        grandSum += (r['grand_total'] as num?) ?? 0;
+      }
+    }
+    return [
+      ...rows,
+      {
+        'sold_at': null,
+        'sale_id': null,
+        'seller_name': '',
+        'medicine_name': 'TOTAL',
+        'medicine_code': '',
+        'qty': qtySum,
+        'unit_price': null,
+        'line_total': lineSum,
+        'discount_total': discountSum,
+        'grand_total': grandSum,
+        'payment_method': '',
+        'payment_reference': '',
+        'override_reason': '',
+      },
+    ];
   }
 
   List<Map<String, dynamic>> get _displayRows {
@@ -255,7 +431,7 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
         return _sortAsc ? cmp : -cmp;
       });
     }
-    return rows;
+    return _appendUnifiedSummaryRow(rows);
   }
 
   String _label(String key) {
@@ -265,16 +441,18 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
   }
 
   String get _pageTitle => switch (widget.reportType) {
-        'sales_summary' => 'Sales summary',
-        'sales_by_staff' => 'Sales by staff',
-        'stock_balance' => 'Stock balance',
-        'expiry_status' => 'Expiry status',
-        'profit_summary' => 'Profit summary',
-        'sales_trend_daily' => 'Daily trend',
-        'sales_trend_monthly' => 'Monthly trend',
-        'sales_trend_yearly' => 'Yearly trend',
-        _ => 'Report',
-      };
+    'sales_unified' => 'Sales report',
+    'sales_summary' => 'Sales summary',
+    'sales_by_staff' => 'Sales by staff',
+    'stock_balance' => 'Stock balance',
+    'expiry_status' => 'Expiry status',
+    'profit_summary' => 'Profit summary',
+    'sales_trend' => 'Sales trend',
+    'sales_trend_daily' => 'Daily trend',
+    'sales_trend_monthly' => 'Monthly trend',
+    'sales_trend_yearly' => 'Yearly trend',
+    _ => 'Report',
+  };
 
   Future<void> _pickDate(bool isFrom) async {
     setState(() => _datePreset = _DatePreset.custom);
@@ -293,6 +471,7 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
           _to = _dateOnly(d);
         }
       });
+      _runSoon();
     }
   }
 
@@ -309,6 +488,7 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
         _from = _dateOnly(picked.start);
         _to = _dateOnly(picked.end);
       });
+      _runSoon();
     }
   }
 
@@ -318,10 +498,23 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
 
     final t = Theme.of(context);
     final cs = t.colorScheme;
-    final keys = _rows.isNotEmpty ? _rows.first.keys.toList() : <String>[];
+    final keys = _rows.isNotEmpty
+        ? _rows.first.keys.where((k) => k != 'sale_id').toList()
+        : <String>[];
     final display = _displayRows;
     final hasData = _rows.isNotEmpty;
-    final fmtShort = DateFormat.MMMd();
+    final categoriesAsync = ref.watch(activeBranchMedicineCategoriesProvider);
+    final categoryOptions =
+        categoriesAsync.value
+            ?.map((row) {
+              final id = (row['id'] as String? ?? '').trim();
+              final name = (row['name'] as String? ?? '').trim();
+              if (id.isEmpty || name.isEmpty) return null;
+              return {'id': id, 'name': name};
+            })
+            .whereType<Map<String, String>>()
+            .toList() ??
+        const <Map<String, String>>[];
 
     return Scaffold(
       backgroundColor: cs.surface,
@@ -330,7 +523,11 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
           _pageTitle,
           style: TextStyle(color: cs.onSurface, fontWeight: FontWeight.w600),
         ),
-        leading: const BackButton(),
+        leading: IconButton(
+          tooltip: 'Back to Report tables',
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => context.go('/pharmacy/reports'),
+        ),
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
         actions: [
@@ -361,11 +558,36 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
           Material(
             color: cs.surface,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (_isSalesRangeReport) ...[
+                    if (widget.reportType == 'sales_trend') ...[
+                      SegmentedButton<_TrendPreset>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(
+                            value: _TrendPreset.day,
+                            label: Text('Day'),
+                          ),
+                          ButtonSegment(
+                            value: _TrendPreset.month,
+                            label: Text('Month'),
+                          ),
+                          ButtonSegment(
+                            value: _TrendPreset.year,
+                            label: Text('Year'),
+                          ),
+                        ],
+                        selected: {_trendPreset},
+                        onSelectionChanged: (next) {
+                          setState(() => _trendPreset = next.first);
+                          _runSoon();
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                    ],
                     SegmentedButton<_DatePreset>(
                       showSelectedIcon: false,
                       segments: const [
@@ -385,6 +607,11 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                           icon: Icon(Icons.date_range_rounded, size: 16),
                         ),
                         ButtonSegment(
+                          value: _DatePreset.thisYear,
+                          label: Text('Annual'),
+                          icon: Icon(Icons.calendar_today_rounded, size: 16),
+                        ),
+                        ButtonSegment(
                           value: _DatePreset.custom,
                           label: Text('Custom'),
                           icon: Icon(Icons.edit_calendar_rounded, size: 16),
@@ -393,114 +620,278 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                       selected: {_datePreset},
                       onSelectionChanged: (next) {
                         setState(() => _applyDatePreset(next.first));
+                        _runSoon();
                       },
-                      style: SegmentedButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        backgroundColor: cs.surfaceContainerHighest.withValues(alpha: 0.45),
-                        foregroundColor: cs.onSurface,
-                        selectedBackgroundColor: cs.primaryContainer,
-                        selectedForegroundColor: cs.onPrimaryContainer,
-                        side: BorderSide(color: cs.outline.withValues(alpha: 0.28)),
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                      ),
                     ),
-                    const SizedBox(height: 10),
-                    InkWell(
-                      onTap: _pickDateRangeQuick,
-                      borderRadius: BorderRadius.circular(14),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: cs.outline.withValues(alpha: 0.22)),
+                    const SizedBox(height: 8),
+                  ],
+                  Theme(
+                    data: t.copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      maintainState: true,
+                      initiallyExpanded: _filtersExpanded,
+                      onExpansionChanged: (v) =>
+                          setState(() => _filtersExpanded = v),
+                      tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+                      childrenPadding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+                      title: const Text('More filters'),
+                      subtitle: Text(
+                        _isUnifiedSalesReport
+                            ? 'Staff, payment, amount, overrides'
+                            : 'Extra report options',
+                        style: t.textTheme.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
                         ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.calendar_month_rounded, size: 22, color: cs.primary),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                      ),
+                      children: [
+                        if (_isSalesRangeReport)
+                          InkWell(
+                            onTap: _pickDateRangeQuick,
+                            borderRadius: BorderRadius.circular(14),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 12,
+                              ),
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerHighest.withValues(
+                                  alpha: 0.35,
+                                ),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: cs.outline.withValues(alpha: 0.22),
+                                ),
+                              ),
+                              child: Row(
                                 children: [
-                                  Text(
-                                    'Date range',
-                                    style: t.textTheme.labelSmall?.copyWith(
-                                      color: cs.onSurfaceVariant,
-                                      fontWeight: FontWeight.w600,
+                                  Icon(
+                                    Icons.calendar_month_rounded,
+                                    size: 22,
+                                    color: cs.primary,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      '${formatDdMmYyyy(_from)} → ${formatDdMmYyyy(_to)}',
+                                      style: t.textTheme.titleSmall?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                        color: cs.onSurface,
+                                      ),
                                     ),
                                   ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '${fmtShort.format(_from)} → ${fmtShort.format(_to)}',
-                                    style: t.textTheme.titleSmall?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                      color: cs.onSurface,
-                                    ),
+                                  TextButton(
+                                    onPressed: () => _pickDate(true),
+                                    child: const Text('From'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () => _pickDate(false),
+                                    child: const Text('To'),
                                   ),
                                 ],
                               ),
                             ),
-                            TextButton(
-                              onPressed: () => _pickDate(true),
-                              child: const Text('From'),
+                          ),
+                        if (_isUnifiedSalesReport) ...[
+                          const SizedBox(height: 10),
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              const spacing = 10.0;
+                              final fieldWidth =
+                                  (constraints.maxWidth - spacing) / 2;
+                              final cellWidth = fieldWidth < 180
+                                  ? constraints.maxWidth
+                                  : fieldWidth;
+                              return Wrap(
+                                spacing: spacing,
+                                runSpacing: spacing,
+                                children: [
+                                  SizedBox(
+                                    width: cellWidth,
+                                    child: DropdownButtonFormField<String>(
+                                      initialValue: _selectedSellerId,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Staff',
+                                        isDense: true,
+                                      ),
+                                      isExpanded: true,
+                                      items: [
+                                        const DropdownMenuItem<String>(
+                                          value: null,
+                                          child: Text('All staff'),
+                                        ),
+                                        ..._sellerOptions.map(
+                                          (s) => DropdownMenuItem<String>(
+                                            value: s['id'],
+                                            child: Text(
+                                              s['name'] ?? '',
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                      onChanged: (value) {
+                                        setState(
+                                          () => _selectedSellerId = value,
+                                        );
+                                        _runSoon();
+                                      },
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: cellWidth,
+                                    child: DropdownButtonFormField<String>(
+                                      initialValue: _selectedPaymentMethod,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Payment',
+                                        isDense: true,
+                                      ),
+                                      isExpanded: true,
+                                      items: const [
+                                        DropdownMenuItem<String>(
+                                          value: null,
+                                          child: Text('All methods'),
+                                        ),
+                                        DropdownMenuItem<String>(
+                                          value: 'cash',
+                                          child: Text('Cash'),
+                                        ),
+                                        DropdownMenuItem<String>(
+                                          value: 'mobile_banking',
+                                          child: Text('Mobile banking'),
+                                        ),
+                                        DropdownMenuItem<String>(
+                                          value: 'bank_transfer',
+                                          child: Text('Bank transfer'),
+                                        ),
+                                      ],
+                                      onChanged: (value) {
+                                        setState(
+                                          () => _selectedPaymentMethod = value,
+                                        );
+                                        _runSoon();
+                                      },
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: cellWidth,
+                                    child: TextField(
+                                      controller: _minAmountCtl,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      decoration: const InputDecoration(
+                                        labelText: 'Min amount',
+                                        isDense: true,
+                                      ),
+                                      onChanged: (_) => _runSoon(),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: cellWidth,
+                                    child: TextField(
+                                      controller: _maxAmountCtl,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      decoration: const InputDecoration(
+                                        labelText: 'Max amount',
+                                        isDense: true,
+                                      ),
+                                      onChanged: (_) => _runSoon(),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          SwitchListTile.adaptive(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Only price overrides'),
+                            subtitle: const Text(
+                              'Show rows with override reasons only',
                             ),
-                            TextButton(
-                              onPressed: () => _pickDate(false),
-                              child: const Text('To'),
+                            value: _overridesOnly,
+                            onChanged: (v) {
+                              setState(() => _overridesOnly = v);
+                              _runSoon();
+                            },
+                          ),
+                        ],
+                        if (_supportsCategoryFilter && categoryOptions.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Medicine categories'),
+                            subtitle: Text(
+                              _selectedCategoryIds.isEmpty
+                                  ? 'All categories'
+                                  : '${_selectedCategoryIds.length} selected',
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                  if (widget.reportType == 'expiry_status') ...[
-                    TextField(
-                      style: TextStyle(color: cs.onSurface, fontSize: 15),
-                      decoration: InputDecoration(
-                        labelText: 'Days ahead for expiry warning',
-                        hintText: '90',
-                        isDense: true,
-                        filled: true,
-                        fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.35),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(color: cs.outline.withValues(alpha: 0.28)),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(color: cs.primary, width: 1.5),
-                        ),
-                      ),
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      controller: _thresholdCtl,
-                    ),
-                  ],
-                  if (widget.reportType == 'stock_balance')
-                    Text(
-                      'Snapshot of this branch (no date filter).',
-                      style: t.textTheme.bodySmall?.copyWith(
-                        color: cs.onSurfaceVariant,
-                        height: 1.35,
-                      ),
-                    ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _loading ? null : _run,
-                    icon: _loading
-                        ? SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: cs.onPrimary,
+                            trailing: const Icon(Icons.checklist_rounded),
+                            onTap: () async {
+                              final selected = await _pickCategoryIds(
+                                categoryOptions,
+                                _selectedCategoryIds,
+                              );
+                              if (selected == null) return;
+                              setState(() {
+                                _selectedCategoryIds
+                                  ..clear()
+                                  ..addAll(selected);
+                              });
+                              _runSoon();
+                            },
+                          ),
+                        ],
+                        if (widget.reportType == 'expiry_status') ...[
+                          TextField(
+                            style: TextStyle(color: cs.onSurface, fontSize: 15),
+                            decoration: InputDecoration(
+                              labelText: 'Days ahead for expiry warning',
+                              hintText: '90',
+                              isDense: true,
+                              filled: true,
+                              fillColor: cs.surfaceContainerHighest.withValues(
+                                alpha: 0.35,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(
+                                  color: cs.outline.withValues(alpha: 0.28),
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(
+                                  color: cs.primary,
+                                  width: 1.5,
+                                ),
+                              ),
                             ),
-                          )
-                        : const Icon(Icons.play_arrow_rounded, size: 22),
-                    label: Text(_loading ? 'Loading…' : (hasData ? 'Apply filters' : 'Load data')),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            controller: _thresholdCtl,
+                            onChanged: (_) => _runSoon(),
+                          ),
+                        ],
+                        if (widget.reportType == 'stock_balance')
+                          Text(
+                            'Snapshot of this branch (no date filter).',
+                            style: t.textTheme.bodySmall?.copyWith(
+                              color: cs.onSurfaceVariant,
+                              height: 1.35,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -515,7 +906,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: cs.surfaceContainerLow.withValues(alpha: 0.85),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(22),
+                ),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.04),
@@ -525,7 +918,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                 ],
               ),
               child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(22),
+                ),
                 child: _loading && !hasData
                     ? Center(
                         child: Column(
@@ -535,121 +930,213 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                             const SizedBox(height: 16),
                             Text(
                               'Fetching rows…',
-                              style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+                              style: t.textTheme.bodyMedium?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
                             ),
                           ],
                         ),
                       )
                     : display.isEmpty
-                        ? _EmptyReportState(
-                            hasRun: _rows.isNotEmpty,
-                            message: _rows.isEmpty
-                                ? 'Data loads automatically. Adjust filters above and tap Apply, or pull to refresh from the app bar.'
-                                : 'No rows match your search. Clear the search box.',
-                          )
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      child: SearchBar(
-                                        controller: _searchCtl,
-                                        hintText: 'Search in table…',
-                                        leading: Icon(Icons.search_rounded, color: cs.onSurfaceVariant),
-                                        trailing: [
-                                          if (_filter.isNotEmpty)
-                                            IconButton(
-                                              tooltip: 'Clear',
-                                              icon: Icon(Icons.close_rounded, color: cs.onSurfaceVariant),
-                                              onPressed: () {
-                                                _searchCtl.clear();
-                                                setState(() => _filter = '');
-                                              },
-                                            ),
-                                        ],
-                                        onChanged: (v) => setState(() => _filter = v),
-                                        elevation: WidgetStateProperty.all(0),
-                                        backgroundColor: WidgetStateProperty.all(
-                                          cs.surface.withValues(alpha: 0.95),
-                                        ),
-                                        side: WidgetStateProperty.all(
-                                          BorderSide(color: cs.outline.withValues(alpha: 0.22)),
-                                        ),
-                                        shape: WidgetStateProperty.all(
-                                          RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(16),
+                    ? _EmptyReportState(
+                        hasRun: _rows.isNotEmpty,
+                        message: _rows.isEmpty
+                            ? 'Data loads automatically. Adjust filters above, or use refresh from the app bar.'
+                            : 'No rows match your search. Clear the search box.',
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: SearchBar(
+                                    controller: _searchCtl,
+                                    hintText: 'Search in table…',
+                                    leading: Icon(
+                                      Icons.search_rounded,
+                                      color: cs.onSurfaceVariant,
+                                    ),
+                                    trailing: [
+                                      if (_filter.isNotEmpty)
+                                        IconButton(
+                                          tooltip: 'Clear',
+                                          icon: Icon(
+                                            Icons.close_rounded,
+                                            color: cs.onSurfaceVariant,
                                           ),
+                                          onPressed: () {
+                                            _searchCtl.clear();
+                                            setState(() => _filter = '');
+                                          },
+                                        ),
+                                    ],
+                                    onChanged: (v) =>
+                                        setState(() => _filter = v),
+                                    elevation: WidgetStateProperty.all(0),
+                                    backgroundColor: WidgetStateProperty.all(
+                                      cs.surface.withValues(alpha: 0.95),
+                                    ),
+                                    side: WidgetStateProperty.all(
+                                      BorderSide(
+                                        color: cs.outline.withValues(
+                                          alpha: 0.22,
                                         ),
                                       ),
                                     ),
-                                    const SizedBox(width: 10),
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 10),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: cs.primaryContainer.withValues(alpha: 0.65),
-                                          borderRadius: BorderRadius.circular(20),
-                                        ),
-                                        child: Text(
-                                          '${display.length}',
-                                          style: t.textTheme.labelLarge?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                            color: cs.onPrimaryContainer,
-                                          ),
-                                        ),
+                                    shape: WidgetStateProperty.all(
+                                      RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
                                       ),
                                     ),
-                                  ],
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.swap_vert_rounded, size: 18, color: cs.onSurfaceVariant),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      child: Text(
-                                        'Tap a column header to sort',
-                                        style: t.textTheme.labelMedium?.copyWith(
-                                          color: cs.onSurfaceVariant,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Expanded(
-                                child: Scrollbar(
-                                  thumbVisibility: true,
-                                  radius: const Radius.circular(8),
-                                  child: _ReportDataTable(
-                                    keys: keys,
-                                    rows: display,
-                                    sortColumnId: _sortKey,
-                                    sortAscending: _sortAsc,
-                                    labelForKey: _label,
-                                    onSort: (key, asc) {
-                                      setState(() {
-                                        _sortKey = key;
-                                        _sortAsc = asc;
-                                      });
-                                    },
                                   ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 10),
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 10),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: cs.primaryContainer.withValues(
+                                        alpha: 0.65,
+                                      ),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(
+                                      '${display.length}',
+                                      style: t.textTheme.labelLarge?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                        color: cs.onPrimaryContainer,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.swap_vert_rounded,
+                                  size: 18,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Tap a column header to sort',
+                                    style: t.textTheme.labelMedium?.copyWith(
+                                      color: cs.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              child: _ReportDataTable(
+                                keys: keys,
+                                rows: display,
+                                sortColumnId: _sortKey,
+                                sortAscending: _sortAsc,
+                                labelForKey: _label,
+                                onSort: (key, asc) {
+                                  setState(() {
+                                    _sortKey = key;
+                                    _sortAsc = asc;
+                                  });
+                                },
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Future<Set<String>?> _pickCategoryIds(
+    List<Map<String, String>> options,
+    Set<String> selected,
+  ) async {
+    return showModalBottomSheet<Set<String>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final temp = Set<String>.from(selected);
+        return StatefulBuilder(
+          builder: (context, setModalState) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  title: const Text('Select categories'),
+                  trailing: TextButton(
+                    onPressed: () => setModalState(temp.clear),
+                    child: const Text('Clear'),
+                  ),
+                ),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final option in options)
+                        CheckboxListTile(
+                          value: temp.contains(option['id']),
+                          title: Text(option['name'] ?? ''),
+                          onChanged: (checked) {
+                            setModalState(() {
+                              final id = option['id'];
+                              if (id == null) return;
+                              if (checked == true) {
+                                temp.add(id);
+                              } else {
+                                temp.remove(id);
+                              }
+                            });
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () => Navigator.pop(ctx, temp),
+                          child: const Text('Apply'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -777,7 +1264,8 @@ class _ReportDataTable extends StatelessWidget {
                       DataColumn(
                         numeric: _columnLooksNumeric(rows, keys[i]),
                         label: Text(labelForKey(keys[i])),
-                        onSort: (columnIndex, asc) => onSort(keys[columnIndex], asc),
+                        onSort: (columnIndex, asc) =>
+                            onSort(keys[columnIndex], asc),
                       ),
                   ],
                   rows: [
@@ -786,14 +1274,18 @@ class _ReportDataTable extends StatelessWidget {
                         color: WidgetStatePropertyAll(
                           i.isEven
                               ? null
-                              : cs.surfaceContainerHighest.withValues(alpha: 0.22),
+                              : cs.surfaceContainerHighest.withValues(
+                                  alpha: 0.22,
+                                ),
                         ),
                         cells: [
                           for (final k in keys)
                             DataCell(
                               SelectableText(
                                 _reportTableCellDisplayText(k, rows[i][k]),
-                                style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurface),
+                                style: t.textTheme.bodyMedium?.copyWith(
+                                  color: cs.onSurface,
+                                ),
                               ),
                             ),
                         ],

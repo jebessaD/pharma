@@ -34,12 +34,23 @@ class _CreateBranchPageState extends ConsumerState<CreateBranchPage> {
   }
 
   Future<void> _save() async {
+    debugPrint('[CreateBranch] submit tapped');
     if (_formKey.currentState?.validate() != true) return;
     final profile = ref.read(pharmacyProfileProvider).value;
     final teamId = profile?['team_id'] as String?;
-    if (teamId == null) return;
+    if (teamId == null || teamId.isEmpty) {
+      debugPrint('[CreateBranch] missing teamId in profile=$profile');
+      setState(() {
+        _error =
+            'Your team profile is not ready yet. Open organization page again or sign in again.';
+      });
+      return;
+    }
     final name = _name.text.trim();
     final code = _code.text.trim();
+    debugPrint(
+      '[CreateBranch] request teamId=$teamId name="$name" code="$code" address="${_address.text.trim()}"',
+    );
     setState(() {
       _loading = true;
       _error = null;
@@ -51,11 +62,13 @@ class _CreateBranchPageState extends ConsumerState<CreateBranchPage> {
         'code': code,
         'address': _address.text.trim().isEmpty ? null : _address.text.trim(),
       });
+      debugPrint('[CreateBranch] insert success');
       if (mounted) {
         AppFeedback.success(context, 'Branch created');
         context.pop();
       }
     } catch (e) {
+      debugPrint('[CreateBranch] insert failed: $e');
       setState(() => _error = mapFormError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -66,34 +79,32 @@ class _CreateBranchPageState extends ConsumerState<CreateBranchPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('New branch')),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
+      body: SafeArea(
         child: Form(
           key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: ListView(
+            padding: const EdgeInsets.all(24),
             children: [
               AppTextFormField(
                 controller: _name,
                 label: 'Branch name',
-                validator: (v) => FormValidators.requiredText(v, label: 'Branch name'),
+                validator: (v) =>
+                    FormValidators.requiredText(v, label: 'Branch name'),
               ),
               const SizedBox(height: 12),
               AppTextFormField(
                 controller: _code,
                 label: 'Branch code (unique per team)',
-                validator: (v) => FormValidators.requiredText(v, label: 'Branch code'),
+                validator: (v) =>
+                    FormValidators.requiredText(v, label: 'Branch code'),
               ),
               const SizedBox(height: 12),
-              AppTextFormField(
-                controller: _address,
-                label: 'Address',
-              ),
+              AppTextFormField(controller: _address, label: 'Address'),
               if (_error != null) ...[
                 const SizedBox(height: 12),
                 FormErrorBanner(message: _error!),
               ],
-              const Spacer(),
+              const SizedBox(height: 24),
               FilledButton(
                 onPressed: _loading ? null : _save,
                 child: _loading

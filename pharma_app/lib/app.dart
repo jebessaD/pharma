@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'features/pos/offline/pos_offline_providers.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 
@@ -9,6 +10,7 @@ class PharmaApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(posSyncServiceProvider);
     final router = ref.watch(goRouterProvider);
     return MaterialApp.router(
       title: 'Pharma',

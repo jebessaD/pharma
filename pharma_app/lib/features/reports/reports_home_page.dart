@@ -34,20 +34,12 @@ class ReportsHomePage extends StatelessWidget {
       title: 'Core reports',
       items: [
         _ReportCard(
-          title: 'Sales summary',
-          subtitle: 'Each sale within a selected date range',
-          path: '/pharmacy/reports/sales_summary',
+          title: 'Sales report',
+          subtitle: 'What sold, who sold, amount, discount and payment',
+          path: '/pharmacy/reports/sales_unified',
           icon: Icons.receipt_long_rounded,
           accent: Color(0xFF2563EB),
           accentSoft: Color(0xFFDBEAFE),
-        ),
-        _ReportCard(
-          title: 'Sales by staff',
-          subtitle: 'Compare who sold what in a date range',
-          path: '/pharmacy/reports/sales_by_staff',
-          icon: Icons.groups_rounded,
-          accent: Color(0xFF059669),
-          accentSoft: Color(0xFFD1FAE5),
         ),
         _ReportCard(
           title: 'Profit summary',
@@ -84,28 +76,12 @@ class ReportsHomePage extends StatelessWidget {
       title: 'Trend reports',
       items: [
         _ReportCard(
-          title: 'Daily trend',
-          subtitle: 'Sales and profit grouped by day',
-          path: '/pharmacy/reports/sales_trend_daily',
-          icon: Icons.calendar_view_day_rounded,
-          accent: Color(0xFFCA8A04),
-          accentSoft: Color(0xFFFEF9C3),
-        ),
-        _ReportCard(
-          title: 'Monthly trend',
-          subtitle: 'Sales and profit grouped by month',
-          path: '/pharmacy/reports/sales_trend_monthly',
+          title: 'Sales trend',
+          subtitle: 'Sales and profit trend (day, month, year)',
+          path: '/pharmacy/reports/sales_trend',
           icon: Icons.calendar_month_rounded,
           accent: Color(0xFFEA580C),
           accentSoft: Color(0xFFFFEDD5),
-        ),
-        _ReportCard(
-          title: 'Yearly trend',
-          subtitle: 'Sales and profit grouped by year',
-          path: '/pharmacy/reports/sales_trend_yearly',
-          icon: Icons.date_range_rounded,
-          accent: Color(0xFF4B5563),
-          accentSoft: Color(0xFFE5E7EB),
         ),
       ],
     ),
@@ -200,7 +176,9 @@ class _ReportListTile extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
+            border: Border.all(
+              color: cs.outlineVariant.withValues(alpha: 0.45),
+            ),
           ),
           padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
           child: Row(

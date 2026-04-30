@@ -1,0 +1,4 @@
+# https://supabase.com/docs/guides/cli/config
+# Public staff username sign-in must run without a user JWT.
+[functions.staff-sign-in-username]
+verify_jwt = false

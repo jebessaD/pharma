@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/auth/auth_persistence.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/widgets/app_error_state.dart';
 
@@ -36,6 +38,8 @@ class _TeamListPageState extends State<TeamListPage> {
 
   Future<void> _signOut() async {
     await Supabase.instance.client.auth.signOut();
+    final prefs = await SharedPreferences.getInstance();
+    await clearLocalAuthMarker(prefs);
     if (mounted) context.go('/login');
   }
 
@@ -86,14 +90,18 @@ class _TeamListPageState extends State<TeamListPage> {
                 final filtered = rows.where((t) {
                   if (_query.trim().isEmpty) return true;
                   final q = _query.trim().toLowerCase();
-                  return ('${t['name'] ?? ''} ${t['status'] ?? ''}').toLowerCase().contains(q);
+                  return ('${t['name'] ?? ''} ${t['status'] ?? ''}')
+                      .toLowerCase()
+                      .contains(q);
                 }).toList();
                 return Column(
                   children: [
                     Padding(
                       padding: const EdgeInsets.all(12),
                       child: TextField(
-                        decoration: const InputDecoration(labelText: 'Search team'),
+                        decoration: const InputDecoration(
+                          labelText: 'Search team',
+                        ),
                         onChanged: (value) => setState(() => _query = value),
                       ),
                     ),
@@ -112,20 +120,20 @@ class _TeamListPageState extends State<TeamListPage> {
                             trailing: Chip(
                               label: Text(active ? 'Active' : 'Suspended'),
                               backgroundColor: active
-                                  ? Theme.of(context)
-                                      .colorScheme
-                                      .primaryContainer
-                                  : Theme.of(context)
-                                      .colorScheme
-                                      .errorContainer,
+                                  ? Theme.of(
+                                      context,
+                                    ).colorScheme.primaryContainer
+                                  : Theme.of(
+                                      context,
+                                    ).colorScheme.errorContainer,
                               labelStyle: TextStyle(
                                 color: active
-                                    ? Theme.of(context)
-                                        .colorScheme
-                                        .onPrimaryContainer
-                                    : Theme.of(context)
-                                        .colorScheme
-                                        .onErrorContainer,
+                                    ? Theme.of(
+                                        context,
+                                      ).colorScheme.onPrimaryContainer
+                                    : Theme.of(
+                                        context,
+                                      ).colorScheme.onErrorContainer,
                               ),
                             ),
                             onTap: () => _openTeamDetail(id),

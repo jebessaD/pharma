@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Ranks medicines: exact [manual_code] (case-insensitive), then name prefix, then generic contains.
+/// Ranks medicines to favor name-first matching for typing flows.
 List<Map<String, dynamic>> rankMedicines(
   List<Map<String, dynamic>> rows,
   String q,
@@ -10,17 +10,24 @@ List<Map<String, dynamic>> rankMedicines(
   if (t.isEmpty) return rows;
   int score(Map<String, dynamic> m) {
     final code = (m['manual_code'] as String? ?? '').toLowerCase();
+    final barcode = (m['barcode'] as String? ?? '').toLowerCase();
     final name = (m['name'] as String? ?? '').toLowerCase();
     final gen = (m['generic_name'] as String? ?? '').toLowerCase();
+    if (barcode == t) return 0;
     if (code == t) return 0;
-    if (code.startsWith(t)) return 1;
-    if (name.startsWith(t)) return 2;
-    if (name.contains(t)) return 3;
+    if (name.startsWith(t)) return 1;
+    if (name.contains(t)) return 2;
+    if (gen.startsWith(t)) return 3;
     if (gen.contains(t)) return 4;
+    if (barcode.startsWith(t)) return 5;
+    if (code.startsWith(t)) return 5;
+    if (barcode.contains(t)) return 6;
+    if (code.contains(t)) return 6;
     return 99;
   }
 
-  final copy = [...rows]..sort((a, b) {
+  final copy = [...rows]
+    ..sort((a, b) {
       final sa = score(a);
       final sb = score(b);
       if (sa != sb) return sa.compareTo(sb);
@@ -36,10 +43,12 @@ class MedicineSearchBar extends StatefulWidget {
   const MedicineSearchBar({
     super.key,
     required this.teamId,
+    required this.branchId,
     required this.onMedicineSelected,
   });
 
   final String teamId;
+  final String branchId;
   final MedicinePicked onMedicineSelected;
 
   @override
@@ -73,6 +82,7 @@ class _MedicineSearchBarState extends State<MedicineSearchBar> {
           .from('medicines')
           .select()
           .eq('team_id', widget.teamId)
+          .eq('branch_id', widget.branchId)
           .eq('is_active', true)
           .limit(500);
       _all = List<Map<String, dynamic>>.from(data as List);
@@ -90,7 +100,8 @@ class _MedicineSearchBarState extends State<MedicineSearchBar> {
     }
     final broad = _all.where((m) {
       final s =
-          '${m['manual_code']} ${m['name']} ${m['generic_name']}'.toLowerCase();
+          '${m['manual_code']} ${m['barcode']} ${m['name']} ${m['generic_name']}'
+              .toLowerCase();
       return s.contains(q.trim().toLowerCase());
     }).toList();
     setState(() => _shown = rankMedicines(broad, q).take(24).toList());
@@ -137,7 +148,12 @@ class _MedicineSearchBarState extends State<MedicineSearchBar> {
                   return ListTile(
                     dense: true,
                     title: Text(m['name'] as String? ?? ''),
-                    subtitle: Text(m['manual_code'] as String? ?? ''),
+                    subtitle: Text(
+                      [
+                        m['manual_code'] as String? ?? '',
+                        m['barcode'] as String? ?? '',
+                      ].where((e) => e.isNotEmpty).join(' · '),
+                    ),
                     onTap: () => widget.onMedicineSelected(m),
                   );
                 },

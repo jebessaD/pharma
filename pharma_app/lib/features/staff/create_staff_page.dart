@@ -39,9 +39,11 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
   }
 
   Future<void> _create() async {
+    debugPrint('[CreateStaff] submit tapped');
     if (_formKey.currentState?.validate() != true) return;
     final profile = ref.read(pharmacyProfileProvider).value;
     if (profile == null) {
+      debugPrint('[CreateStaff] profile is null');
       setState(() {
         _error =
             'Your account profile is not loaded. Open the menu and retry, or sign in again as an administrator.';
@@ -51,6 +53,9 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
     final username = _username.text.trim().toLowerCase();
     final password = _password.text;
     final fullName = _fullName.text.trim();
+    debugPrint(
+      '[CreateStaff] request username=$username role=$_role branch=$_branchId hasTeam=${profile['team_id'] != null}',
+    );
     setState(() {
       _loading = true;
       _error = null;
@@ -66,6 +71,13 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
           'branch_id': _branchId,
         },
       );
+      if (res.status >= 400) {
+        debugPrint(
+          '[CreateStaff] function invoke failed status=${res.status} data=${res.data}',
+        );
+        throw FunctionException(status: res.status, details: res.data);
+      }
+      debugPrint('[CreateStaff] function invoke success status=${res.status}');
       if (!mounted) return;
       String? loginEmail;
       final data = res.data;
@@ -87,13 +99,22 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
                   style: TextStyle(fontSize: 13),
                 ),
                 const SizedBox(height: 12),
-                const Text('Username', style: TextStyle(fontWeight: FontWeight.w600)),
+                const Text(
+                  'Username',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
                 SelectableText(username),
                 const SizedBox(height: 8),
-                const Text('Sign-in email', style: TextStyle(fontWeight: FontWeight.w600)),
+                const Text(
+                  'Sign-in email',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
                 SelectableText(loginEmail ?? '—'),
                 const SizedBox(height: 8),
-                const Text('Password', style: TextStyle(fontWeight: FontWeight.w600)),
+                const Text(
+                  'Password',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
                 SelectableText(password),
               ],
             ),
@@ -101,7 +122,9 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
           actions: [
             TextButton(
               onPressed: () {
-                Clipboard.setData(ClipboardData(text: '${loginEmail ?? ''}\n$password'));
+                Clipboard.setData(
+                  ClipboardData(text: '${loginEmail ?? ''}\n$password'),
+                );
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Copied email and password')),
                 );
@@ -119,6 +142,7 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
       AppFeedback.success(context, 'Staff user created');
       context.pop();
     } catch (e) {
+      debugPrint('[CreateStaff] create failed: $e');
       setState(() => _error = userFacingError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -128,6 +152,8 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
   @override
   Widget build(BuildContext context) {
     final profile = ref.watch(pharmacyProfileProvider).value;
+    final viewerRole = profile?['role'] as String? ?? '';
+    final canAssignAdmin = viewerRole == 'owner';
     final teamId = profile?['team_id'] as String? ?? '';
     final branches = ref.watch(branchesListProvider(teamId)).value ?? const [];
 
@@ -141,7 +167,8 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
             AppTextFormField(
               controller: _fullName,
               label: 'Full name',
-              validator: (v) => FormValidators.requiredText(v, label: 'Full name'),
+              validator: (v) =>
+                  FormValidators.requiredText(v, label: 'Full name'),
             ),
             const SizedBox(height: 12),
             AppTextFormField(
@@ -163,8 +190,13 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
                 labelText: 'Password',
                 suffixIcon: IconButton(
                   tooltip: _obscurePassword ? 'Show password' : 'Hide password',
-                  icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  icon: Icon(
+                    _obscurePassword
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
                 ),
               ),
             ),
@@ -175,13 +207,24 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
                 child: DropdownButton<String>(
                   value: _role,
                   isExpanded: true,
-                  items: const [
-                    DropdownMenuItem(value: 'admin', child: Text('Admin')),
-                    DropdownMenuItem(
+                  items: [
+                    if (canAssignAdmin)
+                      const DropdownMenuItem(
+                        value: 'admin',
+                        child: Text('Admin'),
+                      ),
+                    const DropdownMenuItem(
                       value: 'pharmacist',
                       child: Text('Pharmacist'),
                     ),
-                    DropdownMenuItem(value: 'cashier', child: Text('Cashier')),
+                    const DropdownMenuItem(
+                      value: 'cashier',
+                      child: Text('Cashier'),
+                    ),
+                    const DropdownMenuItem(
+                      value: 'seller',
+                      child: Text('Seller'),
+                    ),
                   ],
                   onChanged: (value) {
                     if (value != null) {

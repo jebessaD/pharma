@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
+import '../../core/providers/selected_branch_provider.dart';
 import '../../core/widgets/app_error_state.dart';
 import '../../core/widgets/form_error_banner.dart';
 
@@ -20,16 +22,13 @@ class PharmacyHomePage extends ConsumerWidget {
     return 'Good evening';
   }
 
-  static String _roleLabel(String role) {
-    if (role.isEmpty) return '';
-    return role[0].toUpperCase() + role.substring(1).toLowerCase();
-  }
-
   static String _roleTagline(String role) {
     return switch (role) {
       'cashier' => 'Checkout and receipts — open POS when a customer is ready.',
+      'seller' => 'Checkout and receipts — open POS when a customer is ready.',
       'pharmacist' => 'Stock, batches, and expiry — keep the shelf accurate.',
       'admin' => 'Operations, purchasing, and team — full control from here.',
+      'owner' => 'Team ownership and full control — including admin access.',
       _ => 'Welcome back.',
     };
   }
@@ -37,12 +36,21 @@ class PharmacyHomePage extends ConsumerWidget {
   static List<_HomeSection> _sectionsForRole(String role) {
     switch (role) {
       case 'cashier':
+      case 'seller':
         return const [];
       case 'pharmacist':
         return [
           _HomeSection(
             title: 'Counter & stock',
             actions: [
+              _HomeAction(
+                icon: Icons.medication_rounded,
+                label: 'Medicines',
+                subtitle: 'Catalog & pricing',
+                path: '/pharmacy/medicines',
+                accent: Color(0xFF0D9488),
+                accentSoft: Color(0xFFCCFBF1),
+              ),
               _HomeAction(
                 icon: Icons.inventory_2_rounded,
                 label: 'Stock',
@@ -68,28 +76,12 @@ class PharmacyHomePage extends ConsumerWidget {
                 accentSoft: Color(0xFFFEF3C7),
               ),
               _HomeAction(
-                icon: Icons.medication_rounded,
-                label: 'Medicines',
-                subtitle: 'Catalog & pricing',
-                path: '/pharmacy/medicines',
-                accent: Color(0xFF0D9488),
-                accentSoft: Color(0xFFCCFBF1),
-              ),
-              _HomeAction(
                 icon: Icons.swap_vert_rounded,
                 label: 'Movements',
                 subtitle: 'In / out history',
                 path: '/pharmacy/stock-movements',
                 accent: Color(0xFF6366F1),
                 accentSoft: Color(0xFFE0E7FF),
-              ),
-              _HomeAction(
-                icon: Icons.tune_rounded,
-                label: 'Adjust stock',
-                subtitle: 'Corrections & counts',
-                path: '/pharmacy/adjust-stock',
-                accent: Color(0xFF475569),
-                accentSoft: Color(0xFFE2E8F0),
               ),
             ],
           ),
@@ -116,10 +108,19 @@ class PharmacyHomePage extends ConsumerWidget {
           ),
         ];
       case 'admin':
+      case 'owner':
         return [
           _HomeSection(
             title: 'Counter & stock',
             actions: [
+              _HomeAction(
+                icon: Icons.medication_rounded,
+                label: 'Medicines',
+                subtitle: 'Catalog & pricing',
+                path: '/pharmacy/medicines',
+                accent: Color(0xFF0D9488),
+                accentSoft: Color(0xFFCCFBF1),
+              ),
               _HomeAction(
                 icon: Icons.inventory_2_rounded,
                 label: 'Stock',
@@ -145,28 +146,12 @@ class PharmacyHomePage extends ConsumerWidget {
                 accentSoft: Color(0xFFFEF3C7),
               ),
               _HomeAction(
-                icon: Icons.medication_rounded,
-                label: 'Medicines',
-                subtitle: 'Catalog & pricing',
-                path: '/pharmacy/medicines',
-                accent: Color(0xFF0D9488),
-                accentSoft: Color(0xFFCCFBF1),
-              ),
-              _HomeAction(
                 icon: Icons.swap_vert_rounded,
                 label: 'Movements',
                 subtitle: 'In / out history',
                 path: '/pharmacy/stock-movements',
                 accent: Color(0xFF6366F1),
                 accentSoft: Color(0xFFE0E7FF),
-              ),
-              _HomeAction(
-                icon: Icons.tune_rounded,
-                label: 'Adjust stock',
-                subtitle: 'Corrections & counts',
-                path: '/pharmacy/adjust-stock',
-                accent: Color(0xFF475569),
-                accentSoft: Color(0xFFE2E8F0),
               ),
             ],
           ),
@@ -253,9 +238,9 @@ class PharmacyHomePage extends ConsumerWidget {
   }
 
   static double _childAspectRatio(int gridCross, double layoutWidth) {
-    if (gridCross >= 3) return 1.12;
-    if (gridCross == 1) return 1.82;
-    return layoutWidth >= 720 ? 1.05 : 1.02;
+    if (gridCross >= 3) return 1.6;
+    if (gridCross == 1) return 2.6;
+    return layoutWidth >= 720 ? 1.55 : 1.45;
   }
 
   @override
@@ -280,111 +265,167 @@ class PharmacyHomePage extends ConsumerWidget {
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: FormErrorBanner(
-                  message: 'No profile is linked to your account. Contact an administrator.',
+                  message:
+                      'No profile is linked to your account. Contact an administrator.',
                 ),
               ),
             ),
           );
         }
         final rawName = (p['full_name'] as String? ?? '').trim();
-        final first = rawName.isEmpty ? 'there' : rawName.split(RegExp(r'\s+')).first;
+        final first = rawName.isEmpty
+            ? 'there'
+            : rawName.split(RegExp(r'\s+')).first;
         final role = p['role'] as String? ?? '';
         final sections = _sectionsForRole(role);
         final tagline = _roleTagline(role);
 
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final maxW = constraints.maxWidth;
-            final pad = maxW >= 600 ? 28.0 : (maxW < 360 ? 12.0 : 20.0);
-            final viewportCross = maxW < 340 ? 1 : (maxW >= 720 ? 3 : 2);
-            final inner = (maxW - 2 * pad).clamp(0.0, double.infinity);
-            final cellW = viewportCross <= 1
-                ? inner
-                : (inner - (viewportCross - 1) * 14) / viewportCross;
-            final tileCompact = cellW < 132;
+        return _AlertsBootstrap(
+          teamId: p['team_id'] as String?,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final maxW = constraints.maxWidth;
+              final pad = maxW >= 600 ? 28.0 : (maxW < 360 ? 12.0 : 20.0);
+              final viewportCross = maxW < 340 ? 1 : (maxW >= 720 ? 3 : 2);
+              final inner = (maxW - 2 * pad).clamp(0.0, double.infinity);
+              final cellW = viewportCross <= 1
+                  ? inner
+                  : (inner - (viewportCross - 1) * 14) / viewportCross;
+              final tileCompact = cellW < 132;
 
-            final slivers = <Widget>[
-              SliverPadding(
-                padding: EdgeInsets.fromLTRB(pad, 20, pad, 12),
-                sliver: SliverToBoxAdapter(
-                  child: _GreetingHeader(
-                    greeting: _greetingLine(),
-                    name: first,
-                    roleLabel: _roleLabel(role),
-                    tagline: tagline,
-                  ),
-                ),
-              ),
-              SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: pad),
-                sliver: SliverToBoxAdapter(
-                  child: _PosHeroCard(
-                    emphasizeCheckout: role == 'cashier',
-                    onTap: () {
-                      HapticFeedback.lightImpact();
-                      context.go('/pharmacy/pos');
-                    },
-                  ),
-                ),
-              ),
-            ];
-
-            if (sections.isEmpty) {
-              slivers.add(
+              final slivers = <Widget>[
                 SliverPadding(
-                  padding: EdgeInsets.fromLTRB(pad, 24, pad, 40),
-                  sliver: const SliverToBoxAdapter(child: _CashierHomeExtras()),
-                ),
-              );
-            } else {
-              for (var si = 0; si < sections.length; si++) {
-                final section = sections[si];
-                final topPad = si == 0 ? 28.0 : 24.0;
-                final gridCross = _gridCross(viewportCross, section.actions.length);
-                final aspect = _childAspectRatio(gridCross, maxW);
-
-                slivers.add(
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(pad, topPad, pad, 10),
-                    sliver: SliverToBoxAdapter(child: _SectionTitle(title: section.title)),
+                  padding: EdgeInsets.fromLTRB(pad, 20, pad, 12),
+                  sliver: SliverToBoxAdapter(
+                    child: _GreetingHeader(
+                      greeting: _greetingLine(),
+                      name: first,
+                      tagline: tagline,
+                    ),
                   ),
-                );
+                ),
+                SliverPadding(
+                  padding: EdgeInsets.symmetric(horizontal: pad),
+                  sliver: SliverToBoxAdapter(
+                    child: _PosHeroCard(
+                      emphasizeCheckout: role == 'cashier' || role == 'seller',
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        context.go('/pharmacy/pos');
+                      },
+                    ),
+                  ),
+                ),
+              ];
+
+              if (sections.isEmpty) {
                 slivers.add(
                   SliverPadding(
-                    padding: EdgeInsets.symmetric(horizontal: pad),
-                    sliver: SliverGrid(
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: gridCross,
-                        mainAxisSpacing: 14,
-                        crossAxisSpacing: 14,
-                        childAspectRatio: aspect,
-                      ),
-                      delegate: SliverChildBuilderDelegate(
-                        (context, i) => _ActionTile(
-                          action: section.actions[i],
-                          compact: tileCompact,
-                          onTap: () {
-                            HapticFeedback.lightImpact();
-                            context.go(section.actions[i].path);
-                          },
-                        ),
-                        childCount: section.actions.length,
-                      ),
+                    padding: EdgeInsets.fromLTRB(pad, 24, pad, 40),
+                    sliver: const SliverToBoxAdapter(
+                      child: _CashierHomeExtras(),
                     ),
                   ),
                 );
-              }
-              slivers.add(SliverPadding(padding: EdgeInsets.only(bottom: pad)));
-            }
+              } else {
+                for (var si = 0; si < sections.length; si++) {
+                  final section = sections[si];
+                  final topPad = si == 0 ? 28.0 : 24.0;
+                  final gridCross = _gridCross(
+                    viewportCross,
+                    section.actions.length,
+                  );
+                  final aspect = _childAspectRatio(gridCross, maxW);
 
-            return CustomScrollView(
-              physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-              slivers: slivers,
-            );
-          },
+                  slivers.add(
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(pad, topPad, pad, 10),
+                      sliver: SliverToBoxAdapter(
+                        child: _SectionTitle(title: section.title),
+                      ),
+                    ),
+                  );
+                  slivers.add(
+                    SliverPadding(
+                      padding: EdgeInsets.symmetric(horizontal: pad),
+                      sliver: SliverGrid(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: gridCross,
+                          mainAxisSpacing: 14,
+                          crossAxisSpacing: 14,
+                          childAspectRatio: aspect,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (context, i) => _ActionTile(
+                            action: section.actions[i],
+                            compact: tileCompact,
+                            onTap: () {
+                              HapticFeedback.lightImpact();
+                              context.go(section.actions[i].path);
+                            },
+                          ),
+                          childCount: section.actions.length,
+                        ),
+                      ),
+                    ),
+                  );
+                }
+                slivers.add(
+                  SliverPadding(padding: EdgeInsets.only(bottom: pad)),
+                );
+              }
+
+              return CustomScrollView(
+                physics: const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
+                ),
+                slivers: slivers,
+              );
+            },
+          ),
         );
       },
     );
+  }
+}
+
+/// Runs [refresh_alerts] once when home loads so expiry/stock notifications stay current.
+class _AlertsBootstrap extends ConsumerStatefulWidget {
+  const _AlertsBootstrap({required this.teamId, required this.child});
+
+  final String? teamId;
+  final Widget child;
+
+  @override
+  ConsumerState<_AlertsBootstrap> createState() => _AlertsBootstrapState();
+}
+
+class _AlertsBootstrapState extends ConsumerState<_AlertsBootstrap> {
+  String? _lastKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final branchId = ref.watch(selectedBranchIdProvider);
+    final key = '${widget.teamId ?? ''}|${branchId ?? ''}';
+    if (key != '|' && key != _lastKey) {
+      _lastKey = key;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _run(widget.teamId, branchId),
+      );
+    }
+    return widget.child;
+  }
+
+  Future<void> _run(String? teamId, String? branchId) async {
+    if (teamId == null || branchId == null) return;
+    try {
+      await Supabase.instance.client.rpc(
+        'refresh_alerts',
+        params: {'p_team_id': teamId, 'p_branch_id': branchId},
+      );
+    } catch (_) {
+      /* non-fatal; user can refresh from Notifications */
+    }
   }
 }
 
@@ -416,9 +457,9 @@ class _HomeLoadingScaffold extends StatelessWidget {
           const SizedBox(height: 20),
           Text(
             'Loading your workspace…',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: cs.onSurfaceVariant,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyLarge?.copyWith(color: cs.onSurfaceVariant),
           ),
         ],
       ),
@@ -430,13 +471,11 @@ class _GreetingHeader extends StatelessWidget {
   const _GreetingHeader({
     required this.greeting,
     required this.name,
-    required this.roleLabel,
     required this.tagline,
   });
 
   final String greeting;
   final String name;
-  final String roleLabel;
   final String tagline;
 
   @override
@@ -463,26 +502,6 @@ class _GreetingHeader extends StatelessWidget {
             height: 1.1,
           ),
         ),
-        if (roleLabel.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: cs.secondaryContainer,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              child: Text(
-                roleLabel,
-                style: t.textTheme.labelLarge?.copyWith(
-                  color: cs.onSecondaryContainer,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.3,
-                ),
-              ),
-            ),
-          ),
-        ],
         const SizedBox(height: 14),
         Text(
           tagline,
@@ -532,10 +551,7 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _PosHeroCard extends StatelessWidget {
-  const _PosHeroCard({
-    required this.onTap,
-    this.emphasizeCheckout = false,
-  });
+  const _PosHeroCard({required this.onTap, this.emphasizeCheckout = false});
 
   final VoidCallback onTap;
   final bool emphasizeCheckout;
@@ -550,10 +566,7 @@ class _PosHeroCard extends StatelessWidget {
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
       colors: isDark
-          ? [
-              cs.primary,
-              Color.lerp(cs.primary, const Color(0xFF14532D), 0.35)!,
-            ]
+          ? [cs.primary, Color.lerp(cs.primary, const Color(0xFF14532D), 0.35)!]
           : [
               cs.primary,
               Color.lerp(cs.primary, const Color(0xFF166534), 0.25)!,
@@ -561,7 +574,9 @@ class _PosHeroCard extends StatelessWidget {
     );
 
     final title = emphasizeCheckout ? 'Open checkout' : 'Point of sale';
-    final headline = emphasizeCheckout ? 'Sell & print receipt' : 'Ring up sales';
+    final headline = emphasizeCheckout
+        ? 'Sell & print receipt'
+        : 'Ring up sales';
     final sub = emphasizeCheckout
         ? 'Cash or mobile — receipt opens after sale.'
         : 'Fast checkout · Cash & mobile';
@@ -677,9 +692,11 @@ class _ActionTile extends StatelessWidget {
     final isDark = t.brightness == Brightness.dark;
 
     final surface = isDark ? cs.surfaceContainerHigh : cs.surface;
-    final border = isDark ? cs.outlineVariant.withValues(alpha: 0.35) : cs.outlineVariant.withValues(alpha: 0.5);
-    final hPad = compact ? 10.0 : 16.0;
-    final vPad = compact ? 12.0 : 16.0;
+    final border = isDark
+        ? cs.outlineVariant.withValues(alpha: 0.35)
+        : cs.outlineVariant.withValues(alpha: 0.5);
+    final hPad = compact ? 10.0 : 14.0;
+    final vPad = compact ? 8.0 : 10.0;
     final iconBox = compact ? 40.0 : 48.0;
     final iconGlyph = compact ? 22.0 : 26.0;
 
@@ -713,13 +730,19 @@ class _ActionTile extends StatelessWidget {
                         end: Alignment.bottomRight,
                         colors: [
                           action.accentSoft,
-                          Color.lerp(action.accentSoft, action.accent, isDark ? 0.35 : 0.2)!,
+                          Color.lerp(
+                            action.accentSoft,
+                            action.accent,
+                            isDark ? 0.35 : 0.2,
+                          )!,
                         ],
                       ),
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
-                          color: action.accent.withValues(alpha: isDark ? 0.2 : 0.12),
+                          color: action.accent.withValues(
+                            alpha: isDark ? 0.2 : 0.12,
+                          ),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         ),
@@ -752,12 +775,12 @@ class _ActionTile extends StatelessWidget {
                       fontSize: compact ? 15 : null,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 1),
                   Text(
                     action.subtitle,
                     style: t.textTheme.bodySmall?.copyWith(
                       color: cs.onSurfaceVariant,
-                      height: 1.25,
+                      height: 1.15,
                       fontSize: compact ? 11 : null,
                     ),
                     maxLines: 2,
@@ -787,7 +810,9 @@ class _CashierHomeExtras extends StatelessWidget {
         Card(
           elevation: 0,
           color: cs.surfaceContainerHighest,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(18),
             child: Row(
@@ -801,7 +826,9 @@ class _CashierHomeExtras extends StatelessWidget {
                     children: [
                       Text(
                         'Need something else?',
-                        style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                        style: t.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Text(

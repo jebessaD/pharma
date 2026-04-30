@@ -27,15 +27,23 @@ class PharmacyHubScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final cs = t.colorScheme;
+    final hasHeaderText = title.trim().isNotEmpty || (subtitle?.trim().isNotEmpty ?? false);
     return Scaffold(
       floatingActionButton: floatingActionButton,
       floatingActionButtonLocation: floatingActionButtonLocation,
       appBar: AppBar(
+        toolbarHeight: hasHeaderText ? null : 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(title),
+            Text(
+              title,
+              style: t.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
+              ),
+            ),
             if (subtitle != null && subtitle!.isNotEmpty)
               Text(
                 subtitle!,

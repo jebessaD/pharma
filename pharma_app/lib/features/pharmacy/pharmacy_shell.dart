@@ -4,21 +4,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/auth/auth_persistence.dart';
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/providers/connectivity_provider.dart';
 import '../../core/router/matched_drawer_path.dart';
+import '../../core/shared_preferences_provider.dart';
+import '../../core/providers/pharmacy_redirect_cache_provider.dart';
+import '../../core/providers/platform_messages_provider.dart';
+import '../../core/providers/team_shell_meta_provider.dart';
+import '../../core/providers/sync_status_provider.dart';
 import '../../core/widgets/app_error_state.dart';
 import '../../core/widgets/form_error_banner.dart';
 import '../../core/providers/branch_change_guard_provider.dart';
 import '../../core/providers/branches_list_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../pos/offline/pos_offline_providers.dart';
 
 class _Dest {
-  const _Dest({
-    required this.path,
-    required this.label,
-    required this.icon,
-  });
+  const _Dest({required this.path, required this.label, required this.icon});
 
   final String path;
   final String label;
@@ -47,9 +51,16 @@ class PharmacyShell extends ConsumerWidget {
       label: 'POS',
       icon: Icons.point_of_sale_rounded,
     );
-    if (role == 'admin') {
+    if (role == 'admin' || role == 'owner') {
       return [
         const _Section('Operations', [home, pos]),
+        const _Section('Insights', [
+          _Dest(
+            path: '/pharmacy/dashboard',
+            label: 'Overview',
+            icon: Icons.pie_chart_rounded,
+          ),
+        ]),
         const _Section('Catalog & stock', [
           _Dest(
             path: '/pharmacy/medicines',
@@ -67,19 +78,14 @@ class PharmacyShell extends ConsumerWidget {
             icon: Icons.add_box_rounded,
           ),
           _Dest(
-            path: '/pharmacy/stock-movements',
-            label: 'Stock movements',
-            icon: Icons.swap_vert_rounded,
-          ),
-          _Dest(
             path: '/pharmacy/expiry',
             label: 'Expiry',
             icon: Icons.event_busy_rounded,
           ),
           _Dest(
-            path: '/pharmacy/adjust-stock',
-            label: 'Adjust stock',
-            icon: Icons.tune_rounded,
+            path: '/pharmacy/stock-movements',
+            label: 'Stock history',
+            icon: Icons.swap_vert_rounded,
           ),
         ]),
         const _Section('Purchasing & alerts', [
@@ -106,12 +112,7 @@ class PharmacyShell extends ConsumerWidget {
             icon: Icons.apartment_rounded,
           ),
         ]),
-        const _Section('Insights', [
-          _Dest(
-            path: '/pharmacy/dashboard',
-            label: 'Overview',
-            icon: Icons.pie_chart_rounded,
-          ),
+        const _Section('Insights & reports', [
           _Dest(
             path: '/pharmacy/reports',
             label: 'Report tables',
@@ -145,19 +146,14 @@ class PharmacyShell extends ConsumerWidget {
             icon: Icons.add_box_rounded,
           ),
           _Dest(
-            path: '/pharmacy/stock-movements',
-            label: 'Stock movements',
-            icon: Icons.swap_vert_rounded,
-          ),
-          _Dest(
             path: '/pharmacy/expiry',
             label: 'Expiry',
             icon: Icons.event_busy_rounded,
           ),
           _Dest(
-            path: '/pharmacy/adjust-stock',
-            label: 'Adjust stock',
-            icon: Icons.tune_rounded,
+            path: '/pharmacy/stock-movements',
+            label: 'Stock history',
+            icon: Icons.swap_vert_rounded,
           ),
         ]),
         const _Section('Insights', [
@@ -179,12 +175,18 @@ class PharmacyShell extends ConsumerWidget {
     ];
   }
 
-  Future<void> _signOut(BuildContext context) async {
+  Future<void> _signOut(BuildContext context, WidgetRef ref) async {
     await Supabase.instance.client.auth.signOut();
+    ref.invalidate(pharmacyRedirectCacheProvider);
+    await clearLocalAuthMarker(ref.read(sharedPreferencesProvider));
+    await ref.read(posOutboxRepositoryProvider).clearAll();
     if (context.mounted) context.go('/login');
   }
 
-  Future<bool> _confirmBranchSwitchIfDirty(BuildContext context, WidgetRef ref) async {
+  Future<bool> _confirmBranchSwitchIfDirty(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
     final guardState = ref.read(branchChangeGuardProvider);
     if (!guardState.hasDirty) return true;
     final ok = await showDialog<bool>(
@@ -215,13 +217,15 @@ class PharmacyShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(posSyncServiceProvider);
     final profileAsync = ref.watch(pharmacyProfileProvider);
+    final isOnline = ref.watch(connectivityProvider).value ?? true;
+    final syncStatus = ref.watch(syncStatusProvider);
     final path = GoRouterState.of(context).uri.path;
 
     return profileAsync.when(
-      loading: () => const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      ),
+      loading: () =>
+          const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (e, _) => Scaffold(
         body: AppErrorState(
           message: userFacingError(e),
@@ -255,7 +259,7 @@ class PharmacyShell extends ConsumerWidget {
                       ),
                       const SizedBox(height: 8),
                       FilledButton.tonal(
-                        onPressed: () => _signOut(context),
+                        onPressed: () => _signOut(context, ref),
                         child: const Text('Sign out'),
                       ),
                     ],
@@ -268,20 +272,45 @@ class PharmacyShell extends ConsumerWidget {
 
         final teamId = profile['team_id'] as String? ?? '';
 
-        return FutureBuilder<Map<String, dynamic>?>(
-          future: Supabase.instance.client
-              .from('teams')
-              .select('status')
-              .eq('id', teamId)
-              .maybeSingle(),
-          builder: (context, teamSnap) {
-            if (teamSnap.connectionState == ConnectionState.done &&
-                teamSnap.data != null &&
-                teamSnap.data!['status'] == 'suspended') {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!context.mounted) return;
-                context.go('/suspended');
-              });
+        ref.listen(teamShellMetaProvider(teamId), (prev, next) {
+          final meta = next.asData?.value;
+          if (meta != null && meta['status'] == 'suspended') {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!context.mounted) return;
+              context.go('/suspended');
+            });
+          }
+        });
+
+        ref.listen(branchesListProvider(teamId), (prev, next) {
+          next.whenData((branches) {
+            if (branches.isEmpty) return;
+            final selected = ref.read(selectedBranchIdProvider);
+            final ok =
+                selected != null && branches.any((b) => b['id'] == selected);
+            if (!ok) {
+              ref
+                  .read(selectedBranchIdProvider.notifier)
+                  .setBranch(branches.first['id'] as String);
+            }
+          });
+        });
+
+        return ref.watch(teamShellMetaProvider(teamId)).when(
+          loading: () => const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          ),
+          error: (e, st) => Scaffold(
+            body: AppErrorState(
+              message: userFacingError(e),
+              debugDetails: e.toString(),
+              onRetry: () {
+                ref.invalidate(teamShellMetaProvider(teamId));
+              },
+            ),
+          ),
+          data: (teamSnap) {
+            if (teamSnap['status'] == 'suspended') {
               return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               );
@@ -292,12 +321,10 @@ class PharmacyShell extends ConsumerWidget {
             final role = profile['role'] as String? ?? '';
             final sections = _sectionsForRole(role);
             final allPaths = [
-              for (final s in sections) for (final d in s.dests) d.path,
+              for (final s in sections)
+                for (final d in s.dests) d.path,
             ];
-            final matched = matchedDrawerPath(
-              path,
-              paths: allPaths,
-            );
+            final matched = matchedDrawerPath(path, paths: allPaths);
 
             return branchesAsync.when(
               loading: () => const Scaffold(
@@ -313,16 +340,8 @@ class PharmacyShell extends ConsumerWidget {
                 ),
               ),
               data: (branches) {
-                if (branches.isNotEmpty &&
-                    (selectedBranch == null ||
-                        !branches.any((b) => b['id'] == selectedBranch))) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (!context.mounted) return;
-                    ref
-                        .read(selectedBranchIdProvider.notifier)
-                        .setBranch(branches.first['id'] as String);
-                  });
-                }
+                final opsSnap = ref.watch(platformOpsProvider).asData?.value;
+                final banner = opsSnap?.bannerMessage;
 
                 final t = Theme.of(context);
                 final cs = t.colorScheme;
@@ -333,7 +352,11 @@ class PharmacyShell extends ConsumerWidget {
                     break;
                   }
                 }
-                final displayName = (profile['full_name'] as String? ?? '').trim();
+                final pharmacyName =
+                    (teamSnap['pharmacy_name'] as String? ?? '').trim();
+                final shellTitle = pharmacyName.isEmpty
+                    ? 'Pharmacy'
+                    : pharmacyName;
                 final roleLabel = role.isEmpty
                     ? ''
                     : '${role[0].toUpperCase()}${role.substring(1).toLowerCase()}';
@@ -353,8 +376,26 @@ class PharmacyShell extends ConsumerWidget {
                         children: [
                           _DrawerHeader(
                             branchTitle: branches.isEmpty ? null : branchTitle,
-                            displayName: displayName.isEmpty ? null : displayName,
+                            displayName: shellTitle,
                             roleLabel: roleLabel.isEmpty ? null : roleLabel,
+                            teamId: teamId,
+                            selectedBranchId: selectedBranch,
+                            notificationsSelected:
+                                matched == '/pharmacy/notifications',
+                            platformMessagesSelected:
+                                matched == '/pharmacy/platform-messages',
+                            onOpenNotifications: () {
+                              HapticFeedback.selectionClick();
+                              Navigator.of(context).pop();
+                              if (path == '/pharmacy/notifications') return;
+                              context.go('/pharmacy/notifications');
+                            },
+                            onOpenPlatformMessages: () {
+                              HapticFeedback.selectionClick();
+                              Navigator.of(context).pop();
+                              if (path == '/pharmacy/platform-messages') return;
+                              context.go('/pharmacy/platform-messages');
+                            },
                           ),
                           ...List.generate(sections.length, (si) {
                             final sec = sections[si];
@@ -379,7 +420,10 @@ class PharmacyShell extends ConsumerWidget {
                           }).expand((w) => w),
                           Padding(
                             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                            child: Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.6)),
+                            child: Divider(
+                              height: 1,
+                              color: cs.outlineVariant.withValues(alpha: 0.6),
+                            ),
                           ),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -394,7 +438,7 @@ class PharmacyShell extends ConsumerWidget {
                               onTap: () {
                                 HapticFeedback.lightImpact();
                                 Navigator.of(context).pop();
-                                _signOut(context);
+                                _signOut(context, ref);
                               },
                             ),
                           ),
@@ -402,104 +446,196 @@ class PharmacyShell extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  body: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Material(
-                        elevation: 0.5,
-                        shadowColor: Colors.black.withValues(alpha: 0.08),
-                        color: cs.surface,
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(2, 2, 10, 2),
-                          child: Row(
-                            children: [
-                              Builder(
-                                builder: (ctx) => IconButton(
-                                  tooltip: 'Menu',
-                                  icon: Icon(Icons.menu_rounded, color: cs.onSurface),
-                                  onPressed: () => Scaffold.of(ctx).openDrawer(),
-                                ),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  'Pharmacy',
-                                  style: t.textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: -0.2,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (branches.isEmpty)
-                                Padding(
-                                  padding: const EdgeInsetsDirectional.only(end: 8),
-                                  child: Text(
-                                    'No branches',
-                                    style: t.textTheme.labelSmall?.copyWith(
-                                      color: cs.onSurfaceVariant,
+                  body: SafeArea(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Material(
+                          elevation: 0.5,
+                          shadowColor: Colors.black.withValues(alpha: 0.08),
+                          color: cs.surface,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(2, 2, 10, 2),
+                            child: Row(
+                              children: [
+                                Builder(
+                                  builder: (ctx) => IconButton(
+                                    tooltip: 'Menu',
+                                    icon: Icon(
+                                      Icons.menu_rounded,
+                                      color: cs.onSurface,
                                     ),
+                                    onPressed: () =>
+                                        Scaffold.of(ctx).openDrawer(),
                                   ),
-                                )
-                              else
+                                ),
                                 Expanded(
-                                  flex: 2,
-                                  child: Align(
+                                  child: Text(
+                                    shellTitle,
+                                    style: t.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: -0.2,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (branches.isEmpty)
+                                  Padding(
+                                    padding: const EdgeInsetsDirectional.only(
+                                      end: 8,
+                                    ),
+                                    child: Text(
+                                      'No branches',
+                                      style: t.textTheme.labelSmall?.copyWith(
+                                        color: cs.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  Align(
                                     alignment: AlignmentDirectional.centerEnd,
-                                    child: DropdownButtonHideUnderline(
-                                      child: DropdownButton<String>(
-                                        isExpanded: true,
-                                        borderRadius: BorderRadius.circular(12),
-                                        value: selectedBranch != null &&
-                                                branches.any(
-                                                  (b) => b['id'] == selectedBranch,
-                                                )
-                                            ? selectedBranch
-                                            : null,
-                                        hint: Text(
-                                          'Branch',
-                                          style: t.textTheme.bodyMedium?.copyWith(
-                                            color: cs.onSurfaceVariant,
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 180,
+                                      ),
+                                      child: DropdownButtonHideUnderline(
+                                        child: DropdownButton<String>(
+                                          isExpanded: true,
+                                          isDense: true,
+                                          borderRadius: BorderRadius.circular(
+                                            12,
                                           ),
-                                        ),
-                                        items: branches
-                                            .map(
-                                              (b) => DropdownMenuItem<String>(
-                                                value: b['id'] as String,
-                                                child: Text(
-                                                  b['name'] as String? ?? '',
-                                                  overflow: TextOverflow.ellipsis,
+                                          value:
+                                              selectedBranch != null &&
+                                                  branches.any(
+                                                    (b) =>
+                                                        b['id'] ==
+                                                        selectedBranch,
+                                                  )
+                                              ? selectedBranch
+                                              : null,
+                                          hint: Text(
+                                            'Branch',
+                                            style: t.textTheme.bodyMedium
+                                                ?.copyWith(
+                                                  color: cs.onSurfaceVariant,
                                                 ),
-                                              ),
-                                            )
-                                            .toList(),
-                                        onChanged: (v) async {
-                                          if (v != null) {
-                                            final current = selectedBranch;
-                                            if (current == v) return;
-                                            final proceed =
-                                                await _confirmBranchSwitchIfDirty(
-                                              context,
-                                              ref,
-                                            );
-                                            if (!proceed) return;
-                                            await ref
-                                                .read(
-                                                  selectedBranchIdProvider.notifier,
-                                                )
-                                                .setBranch(v);
-                                          }
-                                        },
+                                          ),
+                                          items: branches
+                                              .map(
+                                                (b) => DropdownMenuItem<String>(
+                                                  value: b['id'] as String,
+                                                  child: Text(
+                                                    b['name'] as String? ?? '',
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                              )
+                                              .toList(),
+                                          onChanged: (v) async {
+                                            if (v != null) {
+                                              final current = selectedBranch;
+                                              if (current == v) return;
+                                              final proceed =
+                                                  await _confirmBranchSwitchIfDirty(
+                                                    context,
+                                                    ref,
+                                                  );
+                                              if (!proceed) return;
+                                              await ref
+                                                  .read(
+                                                    selectedBranchIdProvider
+                                                        .notifier,
+                                                  )
+                                                  .setBranch(v);
+                                            }
+                                          },
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                      Expanded(child: child),
-                    ],
+                        if (!isOnline || syncStatus.pendingCount > 0)
+                          Material(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.sync_problem_rounded,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      !isOnline
+                                          ? 'Offline - data will sync when internet returns.'
+                                          : 'Pending sync: ${syncStatus.pendingCount}',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        if (banner != null)
+                          MaterialBanner(
+                            backgroundColor: banner['severity'] == 'critical'
+                                ? cs.errorContainer
+                                    .withValues(alpha: 0.45)
+                                : cs.tertiaryContainer
+                                    .withValues(alpha: 0.55),
+                            content: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  banner['title'] as String? ?? '',
+                                  style: t.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                if (((banner['body'] as String?) ?? '')
+                                    .trim()
+                                    .isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    (banner['body'] as String?)!.trim(),
+                                    style: t.textTheme.bodySmall?.copyWith(
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () async {
+                                  final id = banner['id'] as String?;
+                                  if (id != null) {
+                                    await markPlatformMessageRead(ref, id);
+                                  }
+                                },
+                                child: const Text('Dismiss'),
+                              ),
+                            ],
+                          ),
+                        Expanded(child: child),
+                      ],
+                    ),
                   ),
                 );
               },
@@ -511,22 +647,64 @@ class PharmacyShell extends ConsumerWidget {
   }
 }
 
-class _DrawerHeader extends StatelessWidget {
+final _drawerUnreadAlertsCountProvider = FutureProvider.family
+    .autoDispose<int, ({String teamId, String? branchId})>((ref, params) async {
+      final query = Supabase.instance.client
+          .from('notifications')
+          .select('id')
+          .eq('team_id', params.teamId)
+          .eq('is_read', false);
+      if (params.branchId == null) {
+        query.isFilter('branch_id', null);
+      } else {
+        query.or('branch_id.is.null,branch_id.eq.${params.branchId}');
+      }
+      final result = await query;
+      return (result as List).length;
+    });
+
+class _DrawerHeader extends ConsumerWidget {
   const _DrawerHeader({
     this.displayName,
     this.roleLabel,
     this.branchTitle,
+    required this.teamId,
+    required this.selectedBranchId,
+    required this.onOpenNotifications,
+    required this.notificationsSelected,
+    required this.onOpenPlatformMessages,
+    required this.platformMessagesSelected,
   });
 
   final String? displayName;
   final String? roleLabel;
   final String? branchTitle;
+  final String teamId;
+  final String? selectedBranchId;
+  final VoidCallback onOpenNotifications;
+  final bool notificationsSelected;
+  final VoidCallback onOpenPlatformMessages;
+  final bool platformMessagesSelected;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final t = Theme.of(context);
     final cs = t.colorScheme;
     final topPad = MediaQuery.paddingOf(context).top > 0 ? 8.0 : 16.0;
+    final primaryName = (displayName ?? '').trim();
+    final showProfileName = primaryName.isNotEmpty;
+    final headerTitle = showProfileName ? primaryName : 'Pharmacy';
+    final unreadCountAsync = ref.watch(
+      _drawerUnreadAlertsCountProvider((
+        teamId: teamId,
+        branchId: selectedBranchId,
+      )),
+    );
+    final unreadCount = unreadCountAsync.asData?.value ?? 0;
+    final showUnreadBadge = unreadCount > 0;
+    final platformOps = ref.watch(platformOpsProvider).asData?.value;
+    final platformUnread = platformOps?.unreadCount ?? 0;
+    final showPlatformBadge = platformUnread > 0;
 
     return Container(
       width: double.infinity,
@@ -546,32 +724,129 @@ class _DrawerHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: cs.surface.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(
-              Icons.local_pharmacy_rounded,
-              size: 30,
-              color: cs.primary,
-            ),
+          Row(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: cs.surface.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.local_pharmacy_rounded,
+                  size: 30,
+                  color: cs.primary,
+                ),
+              ),
+              const Spacer(),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      IconButton.filledTonal(
+                        tooltip: 'Notifications',
+                        style: IconButton.styleFrom(
+                          backgroundColor: notificationsSelected
+                              ? cs.primary.withValues(alpha: 0.2)
+                              : cs.surface.withValues(alpha: 0.55),
+                          foregroundColor: notificationsSelected
+                              ? cs.primary
+                              : cs.onPrimaryContainer,
+                        ),
+                        onPressed: onOpenNotifications,
+                        icon: const Icon(Icons.notifications_rounded),
+                      ),
+                      if (showUnreadBadge)
+                        PositionedDirectional(
+                          top: -4,
+                          end: -4,
+                          child: Container(
+                            constraints: const BoxConstraints(minWidth: 18),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.error,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              unreadCount > 99 ? '99+' : '$unreadCount',
+                              textAlign: TextAlign.center,
+                              style: t.textTheme.labelSmall?.copyWith(
+                                color: cs.onError,
+                                fontWeight: FontWeight.w700,
+                                height: 1,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(width: 4),
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      IconButton.filledTonal(
+                        tooltip: 'Announcements',
+                        style: IconButton.styleFrom(
+                          backgroundColor: platformMessagesSelected
+                              ? cs.primary.withValues(alpha: 0.2)
+                              : cs.surface.withValues(alpha: 0.55),
+                          foregroundColor: platformMessagesSelected
+                              ? cs.primary
+                              : cs.onPrimaryContainer,
+                        ),
+                        onPressed: onOpenPlatformMessages,
+                        icon: const Icon(Icons.campaign_rounded),
+                      ),
+                      if (showPlatformBadge)
+                        PositionedDirectional(
+                          top: -4,
+                          end: -4,
+                          child: Container(
+                            constraints: const BoxConstraints(minWidth: 18),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.tertiary,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              platformUnread > 99 ? '99+' : '$platformUnread',
+                              textAlign: TextAlign.center,
+                              style: t.textTheme.labelSmall?.copyWith(
+                                color: cs.onTertiary,
+                                fontWeight: FontWeight.w700,
+                                height: 1,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
           ),
           const SizedBox(height: 14),
           Text(
-            'Pharmacy',
+            headerTitle,
             style: t.textTheme.titleLarge?.copyWith(
               color: cs.onPrimaryContainer,
               fontWeight: FontWeight.w800,
               letterSpacing: -0.3,
             ),
           ),
-          if (displayName != null) ...[
+          if (showProfileName) ...[
             const SizedBox(height: 4),
             Text(
-              displayName!,
+              'Pharmacy',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: t.textTheme.titleSmall?.copyWith(
@@ -588,7 +863,10 @@ class _DrawerHeader extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 child: Text(
                   roleLabel!,
                   style: t.textTheme.labelMedium?.copyWith(
@@ -689,11 +967,15 @@ class _DrawerNavTile extends StatelessWidget {
     final muted = tone == _DrawerTileTone.muted;
     final iconBg = selected
         ? cs.primary.withValues(alpha: 0.18)
-        : (muted ? cs.surfaceContainerHighest : cs.surfaceContainerHighest.withValues(alpha: 0.85));
+        : (muted
+              ? cs.surfaceContainerHighest
+              : cs.surfaceContainerHighest.withValues(alpha: 0.85));
     final iconFg = selected
         ? cs.primary
         : (muted ? cs.onSurfaceVariant : cs.onSurfaceVariant);
-    final tileBg = selected ? cs.primaryContainer.withValues(alpha: 0.45) : Colors.transparent;
+    final tileBg = selected
+        ? cs.primaryContainer.withValues(alpha: 0.45)
+        : Colors.transparent;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
