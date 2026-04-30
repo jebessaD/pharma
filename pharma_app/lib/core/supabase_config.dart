@@ -13,4 +13,10 @@ abstract final class SupabaseConfig {
   /// The public site URL configured in Supabase Dashboard → Auth → URL Configuration.
   /// Email verification links are built against this. Must NOT be localhost.
   static const String siteUrl = 'https://jyscupmaxarzzscilvvg.supabase.co';
+
+  /// Dashboard checklist (Auth → URL configuration):
+  /// - Add [emailRedirectTo] to **Redirect URLs** allow list.
+  /// - Keep **Confirm email** enabled for signups if you require verification.
+  /// - Email templates should use `{{ .ConfirmationURL }}` / `{{ .RedirectTo }}`
+  ///   (defaults) so PKCE links include this app redirect, not a stale host.
 }

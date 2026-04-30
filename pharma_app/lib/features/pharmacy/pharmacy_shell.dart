@@ -124,6 +124,13 @@ class PharmacyShell extends ConsumerWidget {
             icon: Icons.history_rounded,
           ),
         ]),
+        const _Section('Support', [
+          _Dest(
+            path: '/pharmacy/contact',
+            label: 'Contact us',
+            icon: Icons.chat_bubble_outline_rounded,
+          ),
+        ]),
       ];
     }
     if (role == 'pharmacist') {
@@ -168,10 +175,25 @@ class PharmacyShell extends ConsumerWidget {
             icon: Icons.table_chart_rounded,
           ),
         ]),
+        const _Section('Support', [
+          _Dest(
+            path: '/pharmacy/contact',
+            label: 'Contact us',
+            icon: Icons.chat_bubble_outline_rounded,
+          ),
+        ]),
       ];
     }
     return [
-      const _Section(null, [home, pos]),
+      const _Section(null, [
+        home,
+        pos,
+        _Dest(
+          path: '/pharmacy/contact',
+          label: 'Contact us',
+          icon: Icons.chat_bubble_outline_rounded,
+        ),
+      ]),
     ];
   }
 

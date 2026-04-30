@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
+import '../../core/providers/platform_messages_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/widgets/app_error_state.dart';
 import '../../core/widgets/form_error_banner.dart';
@@ -305,6 +306,18 @@ class PharmacyHomePage extends ConsumerWidget {
                   ),
                 ),
                 SliverPadding(
+                  padding: EdgeInsets.fromLTRB(pad, 0, pad, 8),
+                  sliver: SliverToBoxAdapter(
+                    child: ref.watch(platformOpsProvider).when(
+                          loading: () => const SizedBox.shrink(),
+                          error: (_, _) => const SizedBox.shrink(),
+                          data: (snap) => snap.messages.isEmpty
+                              ? const SizedBox.shrink()
+                              : _HomePlatformAnnouncements(snap: snap),
+                        ),
+                  ),
+                ),
+                SliverPadding(
                   padding: EdgeInsets.symmetric(horizontal: pad),
                   sliver: SliverToBoxAdapter(
                     child: _PosHeroCard(
@@ -385,6 +398,170 @@ class PharmacyHomePage extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+}
+
+const int _kHomeAnnouncementsMaxCards = 5;
+
+class _HomePlatformAnnouncements extends ConsumerWidget {
+  const _HomePlatformAnnouncements({required this.snap});
+
+  final PlatformOpsSnapshot snap;
+
+  static (IconData, Color) _severityStyle(BuildContext context, String sev) {
+    final cs = Theme.of(context).colorScheme;
+    return switch (sev) {
+      'critical' => (Icons.error_outline_rounded, cs.error),
+      'warning' => (Icons.warning_amber_rounded, cs.tertiary),
+      _ => (Icons.campaign_outlined, cs.primary),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final messages = snap.messages;
+    final unread = snap.unreadCount;
+    final shown = messages.take(_kHomeAnnouncementsMaxCards).toList();
+    final more = messages.length - shown.length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 4,
+              height: 22,
+              decoration: BoxDecoration(
+                color: cs.tertiary,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Announcements',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ),
+            if (unread > 0)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Badge(
+                  label: Text('$unread'),
+                  backgroundColor: cs.error,
+                  textColor: cs.onError,
+                ),
+              ),
+            TextButton(
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                context.go('/pharmacy/platform-messages');
+              },
+              child: const Text('See all'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ...shown.map((m) {
+          final id = m['id'] as String? ?? '';
+          final read = snap.readIds.contains(id);
+          final title = m['title'] as String? ?? '';
+          final body = m['body'] as String? ?? '';
+          final sev = m['severity'] as String? ?? 'info';
+          final (icon, tone) = _severityStyle(context, sev);
+          final fill = tone.withValues(alpha: t.brightness == Brightness.dark ? 0.14 : 0.1);
+          final border = tone.withValues(alpha: 0.45);
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Material(
+              color: fill,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: border),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: id.isEmpty
+                    ? null
+                    : read
+                        ? () {
+                            HapticFeedback.lightImpact();
+                            context.go('/pharmacy/platform-messages');
+                          }
+                        : () {
+                            HapticFeedback.lightImpact();
+                            markPlatformMessageRead(ref, id);
+                          },
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(icon, color: tone, size: 26),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: t.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (body.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                body,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: t.textTheme.bodySmall?.copyWith(
+                                  height: 1.35,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                            if (!read && id.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                'Tap to dismiss',
+                                style: t.textTheme.labelSmall?.copyWith(
+                                  color: cs.primary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+        if (more > 0)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              '+ $more more in Announcements',
+              style: t.textTheme.labelMedium?.copyWith(
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

@@ -3,12 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../auth/auth_persistence.dart';
 import '../providers/app_update_gate_provider.dart';
 import '../providers/connectivity_provider.dart';
 import '../providers/pharmacy_redirect_cache_provider.dart';
 import '../providers.dart';
+import '../shared_preferences_provider.dart';
 import '../../features/audit/activity_log_page.dart';
 import '../../features/auth/login_page.dart';
+import '../../features/auth/reset_password_page.dart';
 import '../../features/auth/signup_page.dart';
 import '../../features/expiry/expiry_hub_page.dart';
 import '../../features/home/pharmacy_home_page.dart';
@@ -37,6 +40,7 @@ import '../../features/shell/auth_callback_page.dart';
 import '../../features/shell/billing_blocked_page.dart';
 import '../../features/shell/animated_splash_page.dart';
 import '../../features/shell/landing_page.dart';
+import '../../features/shell/contact_us_page.dart';
 import '../../features/shell/platform_messages_page.dart';
 import '../../features/shell/team_suspended_page.dart';
 import '../../features/shell/trial_ended_page.dart';
@@ -102,12 +106,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           '/pharmacy/reports',
           '/pharmacy/receipt',
           '/pharmacy/platform-messages',
+          '/pharmacy/contact',
         ];
         const cashierAllowed = <String>[
           '/pharmacy/home',
           '/pharmacy/pos',
           '/pharmacy/receipt',
           '/pharmacy/platform-messages',
+          '/pharmacy/contact',
         ];
         final allowed = switch (role) {
           'admin' => adminAllowed,
@@ -200,10 +206,67 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       if (loc == '/splash') return null;
       if (loc == '/' && session != null) return '/pharmacy/home';
 
+      final authRefresh = ref.read(supabaseAuthRefreshProvider);
+
       // PKCE email links open pharmaapp://auth/callback → path /callback.
-      // Stay on callback while session is being exchanged, then leave.
+      // Route password recovery to reset page, otherwise bootstrap profile
+      // for first-time signups that went through email verification.
       if (loc == '/callback') {
-        return session != null ? '/pharmacy/home' : null;
+        if (authRefresh.passwordRecoveryPending) return '/reset-password';
+        if (session != null) {
+          final user = Supabase.instance.client.auth.currentUser;
+          if (user != null) {
+            final existing = await Supabase.instance.client
+                .from('profiles')
+                .select('id')
+                .eq('id', user.id)
+                .maybeSingle();
+            if (existing == null) {
+              final prefs = ref.read(sharedPreferencesProvider);
+              final pending = readPendingOwnerSignup(prefs);
+              final meta = user.userMetadata ?? const <String, dynamic>{};
+              final authEmail = user.email?.trim().toLowerCase() ?? '';
+              final pendingEmail =
+                  (pending.email ?? '').trim().toLowerCase();
+              final isPending =
+                  authEmail.isNotEmpty && authEmail == pendingEmail;
+
+              final teamName =
+                  (isPending ? pending.teamName : null) ??
+                  (meta['team_name'] as String?) ??
+                  '';
+              final fullName =
+                  (isPending ? pending.fullName : null) ??
+                  (meta['full_name'] as String?) ??
+                  '';
+
+              if (teamName.trim().length >= 2 &&
+                  fullName.trim().isNotEmpty) {
+                try {
+                  await Supabase.instance.client.rpc(
+                    'bootstrap_owner_team',
+                    params: {
+                      'p_team_name': teamName.trim(),
+                      'p_full_name': fullName.trim(),
+                    },
+                  );
+                  await clearPendingOwnerSignup(prefs);
+                } catch (_) {
+                  // bootstrap failed — login page can retry
+                }
+              }
+            }
+          }
+          ref.invalidate(pharmacyRedirectCacheProvider);
+          return '/pharmacy/home';
+        }
+        return null;
+      }
+
+      if (loc == '/reset-password') {
+        if (session == null) return '/login';
+        if (!authRefresh.passwordRecoveryPending) return '/pharmacy/home';
+        return null;
       }
 
       // After deep-link email verification, supabase_flutter exchanges the
@@ -243,6 +306,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/callback',
         builder: (context, state) => const AuthCallbackPage(),
+      ),
+      GoRoute(
+        path: '/reset-password',
+        builder: (context, state) => const ResetPasswordPage(),
       ),
       GoRoute(path: '/signup', builder: (context, state) => const SignupPage()),
       GoRoute(
@@ -441,6 +508,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: 'platform-messages',
                 builder: (context, state) => const PlatformMessagesPage(),
+              ),
+              GoRoute(
+                path: 'contact',
+                builder: (context, state) => const ContactUsPage(),
               ),
               GoRoute(
                 path: 'suppliers',

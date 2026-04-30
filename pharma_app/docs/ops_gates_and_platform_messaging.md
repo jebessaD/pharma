@@ -2,9 +2,11 @@
 
 This document describes **server-driven controls** for app version enforcement, team billing/subscription gates, and global announcements. It is meant for **operators and future maintainers** (no in-app admin UI is required today).
 
-Schema and RPC changes live in the migration:
+Schema and RPC changes live in migrations including:
 
-[`../supabase/migrations/20260430210000_app_gates_billing_platform_messages.sql`](../supabase/migrations/20260430210000_app_gates_billing_platform_messages.sql)
+[`../supabase/migrations/20260430210000_app_gates_billing_platform_messages.sql`](../supabase/migrations/20260430210000_app_gates_billing_platform_messages.sql)  
+[`../supabase/migrations/20260430240000_platform_messages_team_templates.sql`](../supabase/migrations/20260430240000_platform_messages_team_templates.sql) (team scope + templates)  
+[`../supabase/migrations/20260430241000_platform_messages_drop_template_team_check.sql`](../supabase/migrations/20260430241000_platform_messages_drop_template_team_check.sql) (allow template + `team_id` for drafts)
 
 ---
 
@@ -121,12 +123,12 @@ If the database rejects a write with **`billing_blocked`**, the app maps that to
 
 ### Purpose
 
-**Global** announcements (maintenance, policy, critical incidents) **without** mixing them into per-team **`notifications`** (stock/expiry alerts).
+**Global** or **per-team** announcements (maintenance, policy, billing reminders) **without** mixing them into per-team **`notifications`** (stock/expiry alerts).
 
 ### Where to manage
 
 - **Insert / update / delete** rows in **`platform_messages`**.  
-- RLS: only **`platform_admins`** (active) have **`FOR ALL`** on `platform_messages`. Team members only **`SELECT`** active rows in the time window.
+- RLS: only **`platform_admins`** (active) have **`FOR ALL`** on `platform_messages`. Team members only **`SELECT`** active, non-template rows in the time window: **global** (`team_id` null) or **their** team (`team_id` = `profiles.team_id`).
 - **`platform_message_reads`** is written by the **app** when a user dismisses or acknowledges a message.
 
 ### Columns
@@ -137,6 +139,8 @@ If the database rejects a write with **`billing_blocked`**, the app maps that to
 | `severity` | `info`, `warning`, `critical`. First **unread** `warning`/`critical` can drive a **MaterialBanner** in the pharmacy shell. |
 | `starts_at`, `ends_at` | Message visible when `starts_at <= now()` and (`ends_at` is null or `ends_at >= now()`). |
 | `min_app_version` | Optional; if set, clients below this semver **hide** the message until they update. |
+| `team_id` | Optional. If set, only members of that team see the message. If null, **all** signed-in pharmacy users see it (broadcast). |
+| `is_template` | If **`true`**, only **platform admins** see the row. You may set **`team_id`** at the same time (e.g. a draft aimed at one team in the Table Editor). Members only see the message after **`is_template`** is set to **`false`**. |
 
 ### In-app behavior
 
@@ -144,7 +148,27 @@ If the database rejects a write with **`billing_blocked`**, the app maps that to
 - Shell: **banner** for unread **warning** / **critical** messages (dismiss marks read).
 - Full list: **`/pharmacy/platform-messages`** (also on role allowlists in the router).
 
-### Example SQL (as superuser / service role or via admin tooling)
+### Generic templates (seeded)
+
+The migration seeds four **templates** (`is_template = true`): *Payment reminder*, *Contract / subscription renewal*, *Critical: compliance…*, *Scheduled maintenance notice*. They are invisible to pharmacy users until activated.
+
+### Activate a template for one team
+
+As a **platform admin** (Table Editor or SQL):
+
+```sql
+UPDATE public.platform_messages
+SET
+  is_template = false,
+  team_id = '<team_uuid>',
+  starts_at = now(),
+  ends_at = now() + interval '14 days'  -- optional; omit for open-ended
+WHERE id = '<message_uuid>';
+```
+
+To target a **new** team with the same wording, **duplicate** the row in the dashboard (or `INSERT … SELECT` with a new `id`) so other teams keep their own schedule.
+
+### Example SQL — broadcast (all teams)
 
 ```sql
 INSERT INTO public.platform_messages (title, body, severity, starts_at, ends_at)
@@ -156,6 +180,8 @@ VALUES (
   now() + interval '2 days'
 );
 ```
+
+Use **`team_id` null** and **`is_template` false** (default) for a global broadcast.
 
 To retire a message early, set **`ends_at`** to **`now()`** or delete the row.
 
@@ -170,7 +196,8 @@ To retire a message early, set **`ends_at`** to **`now()`** or delete the row.
 | Mark team as paying | `teams.billing_status = 'active'`. |
 | Block team for billing | `past_due`, `suspended_billing`, or `churned`. |
 | Give a short extension | `grace` + `billing_grace_ends_at`. |
-| Broadcast to all signed-in users | Insert into `platform_messages` (as platform admin or service role). |
+| Broadcast to all signed-in users | Insert into `platform_messages` with `team_id` null, `is_template` false. |
+| Message for one pharmacy team only | Insert/update with that team’s `team_id`, or activate a template (see above). |
 
 ---
 

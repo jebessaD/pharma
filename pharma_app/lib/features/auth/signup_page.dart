@@ -30,6 +30,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
   bool _resending = false;
   bool _pendingConfirmation = false;
   String? _error;
+  String? _successMessage;
 
   @override
   void dispose() {
@@ -45,6 +46,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _successMessage = null;
     });
     var didNavigate = false;
 
@@ -57,6 +59,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
       final authRes = await Supabase.instance.client.auth.signUp(
         email: email,
         password: pwd,
+        emailRedirectTo: SupabaseConfig.emailRedirectTo,
         data: {'full_name': name, 'team_name': team},
       );
 
@@ -69,6 +72,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
       if (isRepeatedSignup) {
         if (!mounted) return;
         setState(() {
+          _successMessage = null;
           _error = 'This email is already registered. Go back and sign in.';
         });
         return;
@@ -94,7 +98,8 @@ class _SignupPageState extends ConsumerState<SignupPage> {
           if (!mounted) return;
           setState(() {
             _pendingConfirmation = true;
-            _error =
+            _error = null;
+            _successMessage =
                 'Account created! Check your email for a confirmation link, '
                 'then come back and sign in.';
           });
@@ -121,7 +126,10 @@ class _SignupPageState extends ConsumerState<SignupPage> {
       didNavigate = true;
       context.go('/pharmacy/home');
     } on AuthException catch (e) {
-      setState(() => _error = userFacingError(e));
+      setState(() {
+        _successMessage = null;
+        _error = userFacingError(e);
+      });
     } on PostgrestException catch (e) {
       if (e.message.contains('profile_exists')) {
         // Profile already exists -- just go to home.
@@ -131,9 +139,15 @@ class _SignupPageState extends ConsumerState<SignupPage> {
         context.go('/pharmacy/home');
         return;
       }
-      setState(() => _error = userFacingError(e));
+      setState(() {
+        _successMessage = null;
+        _error = userFacingError(e);
+      });
     } catch (e) {
-      setState(() => _error = userFacingError(e));
+      setState(() {
+        _successMessage = null;
+        _error = userFacingError(e);
+      });
     } finally {
       if (!didNavigate && mounted) {
         setState(() => _loading = false);
@@ -147,6 +161,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
     setState(() {
       _resending = true;
       _error = null;
+      _successMessage = null;
     });
     try {
       await Supabase.instance.client.auth.resend(
@@ -156,10 +171,16 @@ class _SignupPageState extends ConsumerState<SignupPage> {
       );
       if (!mounted) return;
       setState(() {
-        _error = 'Confirmation email resent to $email. Check your inbox and spam folder.';
+        _successMessage =
+            'Confirmation email resent to $email. Check your inbox and spam folder.';
       });
     } catch (e) {
-      if (mounted) setState(() => _error = userFacingError(e));
+      if (mounted) {
+        setState(() {
+          _successMessage = null;
+          _error = userFacingError(e);
+        });
+      }
     } finally {
       if (mounted) setState(() => _resending = false);
     }
@@ -283,6 +304,10 @@ class _SignupPageState extends ConsumerState<SignupPage> {
                         if (_error != null) ...[
                           const SizedBox(height: 12),
                           FormErrorBanner(message: _error!),
+                        ],
+                        if (_successMessage != null) ...[
+                          const SizedBox(height: 12),
+                          FormSuccessBanner(message: _successMessage!),
                         ],
                         if (_pendingConfirmation) ...[
                           const SizedBox(height: 8),

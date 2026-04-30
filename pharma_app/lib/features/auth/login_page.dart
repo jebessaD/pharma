@@ -203,7 +203,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       messenger?.showSnackBar(
         const SnackBar(
           content:
-              Text('Password reset email sent. Check your inbox and spam.'),
+              Text('Reset email sent. Open the link to set a new password.'),
         ),
       );
     }
@@ -417,7 +417,9 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('Enter your email and we\'ll send a password reset link.'),
+          const Text(
+            'Enter your email and we\'ll send a reset link. Open it to set a new password.',
+          ),
           const SizedBox(height: 16),
           TextField(
             controller: _emailCtl,
