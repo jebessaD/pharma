@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------------------
+# 1) Copy this file to:  android/key.properties  (that file is gitignored)
+# 2) Replace every CHANGE_ME_* value with what you actually used in keytool
+# ---------------------------------------------------------------------------
+#
+# Create the keystore once (run from this android/ folder):
+#
+#   keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+#
+# keytool will ask for two passwords:
+#   - Keystore password  → goes in storePassword below
+#   - Key password        → goes in keyPassword below (often same as keystore)
+#
+# keyAlias must match the -alias you passed (here: upload).
+# storeFile is relative to the android/ folder (same folder as key.properties).
+
+# Password for the .jks file (keystore)
+storePassword=CHANGE_ME_KEYSTORE_PASSWORD
+
+# Password for the key named by keyAlias inside that file
+keyPassword=CHANGE_ME_KEY_PASSWORD
+
+# Must match:  keytool ... -alias upload
+keyAlias=upload
+
+# Path to .jks relative to android/ e.g. upload-keystore.jks in android/
+storeFile=upload-keystore.jks

@@ -7,13 +7,15 @@ import '../../core/auth/auth_persistence.dart'
     show
         clearLocalAuthMarker,
         clearPendingOwnerSignup,
-        lastTeamIdForStaffSignInKey,
-        persistLastTeamIdForStaffSignIn,
         persistLocalAuthMarker,
         readPendingOwnerSignup;
+import '../../core/auth/staff_login_email.dart';
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/providers/branches_list_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
+import '../../core/providers/selected_branch_provider.dart';
+import '../../core/providers/team_shell_meta_provider.dart';
 import '../../core/shared_preferences_provider.dart';
 import '../../core/supabase_config.dart';
 import '../../core/app_assets.dart';
@@ -71,24 +73,29 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           password: pwd,
         );
       } else {
-        final prefs = ref.read(sharedPreferencesProvider);
-        final teamHint = prefs.getString(lastTeamIdForStaffSignInKey);
-        final res = await Supabase.instance.client.functions.invoke(
-          'staff-sign-in-username',
-          body: {
-            'username': ident,
-            'password': pwd,
-            if (teamHint != null && teamHint.isNotEmpty) 'team_id': teamHint,
-          },
-        );
-        final d = res.data;
-        if (d is! Map) throw Exception('bad_response');
-        final at = d['access_token'] as String?;
-        final rt = d['refresh_token'] as String?;
-        if (at == null || rt == null || at.isEmpty || rt.isEmpty) {
-          throw Exception('bad_response');
+        final syntheticEmail = staffSyntheticLoginEmail(ident);
+        try {
+          await Supabase.instance.client.auth.signInWithPassword(
+            email: syntheticEmail,
+            password: pwd,
+          );
+        } on AuthException {
+          final res = await Supabase.instance.client.functions.invoke(
+            'staff-sign-in-username',
+            body: {
+              'username': ident,
+              'password': pwd,
+            },
+          );
+          final d = res.data;
+          if (d is! Map) throw Exception('bad_response');
+          final at = d['access_token'] as String?;
+          final rt = d['refresh_token'] as String?;
+          if (at == null || rt == null || at.isEmpty || rt.isEmpty) {
+            throw Exception('bad_response');
+          }
+          await Supabase.instance.client.auth.setSession(rt, accessToken: at);
         }
-        await Supabase.instance.client.auth.setSession(rt, accessToken: at);
       }
 
       final user = Supabase.instance.client.auth.currentUser;
@@ -163,7 +170,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       if (profile == null || profile['is_active'] != true) {
         await Supabase.instance.client.auth.signOut();
         ref.invalidate(pharmacyRedirectCacheProvider);
-        await clearLocalAuthMarker(ref.read(sharedPreferencesProvider));
+        final prefsOut = ref.read(sharedPreferencesProvider);
+        await clearLocalAuthMarker(prefsOut);
         setState(() {
           _error =
               'Your profile is deactivated. Contact your pharmacy administrator.';
@@ -172,11 +180,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       }
 
       final teamId = profile['team_id'] as String?;
+      await ref.read(selectedBranchIdProvider.notifier).setBranch(null);
       if (teamId != null && teamId.isNotEmpty) {
-        await persistLastTeamIdForStaffSignIn(
-          ref.read(sharedPreferencesProvider),
-          teamId,
-        );
+        ref.invalidate(teamShellMetaProvider(teamId));
+        ref.invalidate(branchesListProvider(teamId));
       }
       ref.invalidate(pharmacyRedirectCacheProvider);
 
@@ -249,7 +256,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         ),
                         const SizedBox(height: 10),
                         Text(
-                          'Pharma Stocks',
+                          'Pharma Shelf',
                           textAlign: TextAlign.center,
                           style: t.textTheme.headlineSmall?.copyWith(
                             fontWeight: FontWeight.w700,

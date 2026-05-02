@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/utils/csv_export.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
@@ -80,6 +81,50 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
   List<Map<String, String>> _sellerOptions = const [];
 
   bool get _isUnifiedSalesReport => widget.reportType == 'sales_unified';
+
+  /// Pharmacists: sales tables only — Today / 7d / 30d (no annual or custom).
+  bool get _narrowPharmacistSalesDates {
+    final role =
+        (ref.watch(pharmacyProfileProvider).asData?.value?['role'] as String? ??
+                '')
+            .trim()
+            .toLowerCase();
+    if (role != 'pharmacist') return false;
+    return widget.reportType == 'sales_unified' ||
+        widget.reportType == 'sales_summary' ||
+        widget.reportType == 'sales_by_staff';
+  }
+
+  bool get _isPharmacist {
+    final role =
+        (ref.watch(pharmacyProfileProvider).asData?.value?['role'] as String? ??
+                '')
+            .trim()
+            .toLowerCase();
+    return role == 'pharmacist';
+  }
+
+  bool get _pharmacistProfitBlocked =>
+      _isPharmacist && widget.reportType == 'profit_summary';
+
+  bool _readIsPharmacist() {
+    final role =
+        (ref.read(pharmacyProfileProvider).asData?.value?['role'] as String? ??
+                '')
+            .trim()
+            .toLowerCase();
+    return role == 'pharmacist';
+  }
+
+  String? get _effectiveSoldByForRpc {
+    if (!_isPharmacist) return _selectedSellerId;
+    if (widget.reportType == 'sales_unified' ||
+        widget.reportType == 'sales_summary') {
+      return Supabase.instance.client.auth.currentUser?.id;
+    }
+    return _selectedSellerId;
+  }
+
   bool get _supportsCategoryFilter =>
       widget.reportType == 'sales_unified' ||
       widget.reportType == 'stock_balance' ||
@@ -145,6 +190,53 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
       _from = today;
       _to = today;
       _datePreset = _DatePreset.today;
+    }
+  }
+
+  bool _pharmacistNarrowSalesDatePresets() {
+    final role =
+        (ref.read(pharmacyProfileProvider).asData?.value?['role'] as String? ??
+                '')
+            .trim()
+            .toLowerCase();
+    if (role != 'pharmacist') return false;
+    return widget.reportType == 'sales_unified' ||
+        widget.reportType == 'sales_summary' ||
+        widget.reportType == 'sales_by_staff';
+  }
+
+  static List<Map<String, dynamic>> _unifiedRowsToSalesSummary(
+    List<Map<String, dynamic>> unified,
+  ) {
+    final bySale = <String, Map<String, dynamic>>{};
+    for (final r in unified) {
+      final id = '${r['sale_id'] ?? ''}'.trim();
+      if (id.isEmpty) continue;
+      bySale[id] = {
+        'sale_id': r['sale_id'],
+        'sold_at': r['sold_at'],
+        'grand_total': r['grand_total'],
+      };
+    }
+    final out = bySale.values.toList();
+    out.sort((a, b) {
+      final ta = a['sold_at'];
+      final tb = b['sold_at'];
+      if (ta is String && tb is String) return tb.compareTo(ta);
+      return 0;
+    });
+    return out;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_pharmacistNarrowSalesDatePresets()) return;
+    if (_datePreset == _DatePreset.thisYear || _datePreset == _DatePreset.custom) {
+      _applyDatePreset(_DatePreset.today);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _runSoon();
+      });
     }
   }
 
@@ -247,7 +339,7 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
             'p_branch_id': branchId,
             'p_from': fmt.format(_from),
             'p_to': fmt.format(_to),
-            'p_sold_by': _selectedSellerId,
+            'p_sold_by': _effectiveSoldByForRpc,
             'p_min_amount': minAmount,
             'p_max_amount': maxAmount,
             'p_payment_method': _selectedPaymentMethod,
@@ -259,27 +351,96 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
         );
         _rows = List<Map<String, dynamic>>.from(data as List);
       } else if (t == 'sales_summary') {
-        final data = await Supabase.instance.client.rpc(
-          'rpc_report_sales_summary',
-          params: {
-            'p_team_id': teamId,
-            'p_branch_id': branchId,
-            'p_from': fmt.format(_from),
-            'p_to': fmt.format(_to),
-          },
-        );
-        _rows = List<Map<String, dynamic>>.from(data as List);
+        if (_readIsPharmacist()) {
+          final uid = Supabase.instance.client.auth.currentUser?.id;
+          if (uid == null) {
+            _rows = [];
+          } else {
+            final data = await _rpcWithOptionalCategory(
+              'rpc_report_sales_unified',
+              {
+                'p_team_id': teamId,
+                'p_branch_id': branchId,
+                'p_from': fmt.format(_from),
+                'p_to': fmt.format(_to),
+                'p_sold_by': uid,
+                'p_min_amount': null,
+                'p_max_amount': null,
+                'p_payment_method': null,
+                'p_overrides_only': false,
+                'p_category_ids': _selectedCategoryIds.isEmpty
+                    ? null
+                    : _selectedCategoryIds.toList(growable: false),
+              },
+            );
+            final raw =
+                List<Map<String, dynamic>>.from(data as List? ?? const []);
+            _rows = _unifiedRowsToSalesSummary(raw);
+          }
+        } else {
+          final data = await Supabase.instance.client.rpc(
+            'rpc_report_sales_summary',
+            params: {
+              'p_team_id': teamId,
+              'p_branch_id': branchId,
+              'p_from': fmt.format(_from),
+              'p_to': fmt.format(_to),
+            },
+          );
+          _rows = List<Map<String, dynamic>>.from(data as List);
+        }
       } else if (t == 'sales_by_staff') {
-        final data = await Supabase.instance.client.rpc(
-          'rpc_report_sales_by_staff',
-          params: {
-            'p_team_id': teamId,
-            'p_branch_id': branchId,
-            'p_from': fmt.format(_from),
-            'p_to': fmt.format(_to),
-          },
-        );
-        _rows = List<Map<String, dynamic>>.from(data as List);
+        if (_readIsPharmacist()) {
+          final uid = Supabase.instance.client.auth.currentUser?.id;
+          if (uid == null) {
+            _rows = [];
+          } else {
+            final data = await _rpcWithOptionalCategory(
+              'rpc_report_sales_unified',
+              {
+                'p_team_id': teamId,
+                'p_branch_id': branchId,
+                'p_from': fmt.format(_from),
+                'p_to': fmt.format(_to),
+                'p_sold_by': uid,
+                'p_min_amount': null,
+                'p_max_amount': null,
+                'p_payment_method': null,
+                'p_overrides_only': false,
+                'p_category_ids': _selectedCategoryIds.isEmpty
+                    ? null
+                    : _selectedCategoryIds.toList(growable: false),
+              },
+            );
+            final raw =
+                List<Map<String, dynamic>>.from(data as List? ?? const []);
+            final seen = <String>{};
+            num total = 0;
+            for (final r in raw) {
+              final sid = '${r['sale_id'] ?? ''}'.trim();
+              if (sid.isEmpty || !seen.add(sid)) continue;
+              total += (r['grand_total'] as num?) ?? 0;
+            }
+            _rows = [
+              {
+                'seller_name': 'My sales',
+                'sale_count': seen.length,
+                'total_sales': total,
+              },
+            ];
+          }
+        } else {
+          final data = await Supabase.instance.client.rpc(
+            'rpc_report_sales_by_staff',
+            params: {
+              'p_team_id': teamId,
+              'p_branch_id': branchId,
+              'p_from': fmt.format(_from),
+              'p_to': fmt.format(_to),
+            },
+          );
+          _rows = List<Map<String, dynamic>>.from(data as List);
+        }
       } else if (t == 'profit_summary') {
         final data = await Supabase.instance.client.rpc(
           'rpc_report_profit_summary',
@@ -363,17 +524,24 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
   Future<void> _exportCsv() async {
     if (_rows.isEmpty) return;
     final keys = _rows.first.keys.where((k) => k != 'sale_id').toList();
-    final header = keys.join(',');
+    final header = keys.map(csvEscapeField).join(',');
     final lines = _rows
-        .map((row) => keys.map((k) => '${row[k] ?? ''}').join(','))
+        .map((row) => keys.map((k) => csvEscapeField(row[k])).join(','))
         .toList();
-    await Clipboard.setData(
-      ClipboardData(text: ([header, ...lines]).join('\n')),
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('CSV copied to clipboard')));
+    final text = [header, ...lines].join('\n');
+    try {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('CSV copied to clipboard')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not copy CSV to clipboard.')),
+        );
+      }
     }
   }
 
@@ -454,6 +622,81 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
     _ => 'Report',
   };
 
+  Widget _reportSearchBarRow(ThemeData t, ColorScheme cs, int displayCount) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: SearchBar(
+              controller: _searchCtl,
+              hintText: 'Search in table…',
+              leading: Icon(
+                Icons.search_rounded,
+                color: cs.onSurfaceVariant,
+              ),
+              trailing: [
+                if (_filter.isNotEmpty)
+                  IconButton(
+                    tooltip: 'Clear',
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: cs.onSurfaceVariant,
+                    ),
+                    onPressed: () {
+                      _searchCtl.clear();
+                      setState(() => _filter = '');
+                    },
+                  ),
+              ],
+              onChanged: (v) => setState(() => _filter = v),
+              elevation: WidgetStateProperty.all(0),
+              backgroundColor: WidgetStateProperty.all(
+                cs.surface.withValues(alpha: 0.95),
+              ),
+              side: WidgetStateProperty.all(
+                BorderSide(
+                  color: cs.outline.withValues(
+                    alpha: 0.22,
+                  ),
+                ),
+              ),
+              shape: WidgetStateProperty.all(
+                RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 6,
+              ),
+              decoration: BoxDecoration(
+                color: cs.primaryContainer.withValues(
+                  alpha: 0.65,
+                ),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                '$displayCount',
+                style: t.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: cs.onPrimaryContainer,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _pickDate(bool isFrom) async {
     setState(() => _datePreset = _DatePreset.custom);
     final initial = isFrom ? _from : _to;
@@ -494,6 +737,33 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_pharmacistProfitBlocked) {
+      return Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            tooltip: 'Back',
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () {
+              if (Navigator.of(context).canPop()) {
+                context.pop();
+              } else {
+                context.go('/pharmacy/reports');
+              }
+            },
+          ),
+          scrolledUnderElevation: 0,
+          surfaceTintColor: Colors.transparent,
+          title: const Text('Profit summary'),
+        ),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('This report is not available for your role.'),
+          ),
+        ),
+      );
+    }
+
     _scheduleInitialLoad();
 
     final t = Theme.of(context);
@@ -503,6 +773,11 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
         : <String>[];
     final display = _displayRows;
     final hasData = _rows.isNotEmpty;
+    final filterTrim = _filter.trim();
+    final showInitialTableEmpty =
+        display.isEmpty && !hasData && filterTrim.isEmpty;
+    final showEmptyTableWithSearch =
+        display.isEmpty && (hasData || filterTrim.isNotEmpty);
     final categoriesAsync = ref.watch(activeBranchMedicineCategoriesProvider);
     final categoryOptions =
         categoriesAsync.value
@@ -524,9 +799,15 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
           style: TextStyle(color: cs.onSurface, fontWeight: FontWeight.w600),
         ),
         leading: IconButton(
-          tooltip: 'Back to Report tables',
+          tooltip: 'Back',
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go('/pharmacy/reports'),
+          onPressed: () {
+            if (Navigator.of(context).canPop()) {
+              context.pop();
+            } else {
+              context.go('/pharmacy/reports');
+            }
+          },
         ),
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
@@ -590,32 +871,34 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                     ],
                     SegmentedButton<_DatePreset>(
                       showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment(
+                      segments: [
+                        const ButtonSegment(
                           value: _DatePreset.today,
                           label: Text('Today'),
                           icon: Icon(Icons.today_rounded, size: 16),
                         ),
-                        ButtonSegment(
+                        const ButtonSegment(
                           value: _DatePreset.last7,
                           label: Text('7d'),
                           icon: Icon(Icons.view_week_rounded, size: 16),
                         ),
-                        ButtonSegment(
+                        const ButtonSegment(
                           value: _DatePreset.last30,
                           label: Text('30d'),
                           icon: Icon(Icons.date_range_rounded, size: 16),
                         ),
-                        ButtonSegment(
-                          value: _DatePreset.thisYear,
-                          label: Text('Annual'),
-                          icon: Icon(Icons.calendar_today_rounded, size: 16),
-                        ),
-                        ButtonSegment(
-                          value: _DatePreset.custom,
-                          label: Text('Custom'),
-                          icon: Icon(Icons.edit_calendar_rounded, size: 16),
-                        ),
+                        if (!_narrowPharmacistSalesDates) ...[
+                          const ButtonSegment(
+                            value: _DatePreset.thisYear,
+                            label: Text('Annual'),
+                            icon: Icon(Icons.calendar_today_rounded, size: 16),
+                          ),
+                          const ButtonSegment(
+                            value: _DatePreset.custom,
+                            label: Text('Custom'),
+                            icon: Icon(Icons.edit_calendar_rounded, size: 16),
+                          ),
+                        ],
                       ],
                       selected: {_datePreset},
                       onSelectionChanged: (next) {
@@ -644,7 +927,7 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                         ),
                       ),
                       children: [
-                        if (_isSalesRangeReport)
+                        if (_isSalesRangeReport && !_narrowPharmacistSalesDates)
                           InkWell(
                             onTap: _pickDateRangeQuick,
                             borderRadius: BorderRadius.circular(14),
@@ -705,38 +988,39 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                                 spacing: spacing,
                                 runSpacing: spacing,
                                 children: [
-                                  SizedBox(
-                                    width: cellWidth,
-                                    child: DropdownButtonFormField<String>(
-                                      initialValue: _selectedSellerId,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Staff',
-                                        isDense: true,
-                                      ),
-                                      isExpanded: true,
-                                      items: [
-                                        const DropdownMenuItem<String>(
-                                          value: null,
-                                          child: Text('All staff'),
+                                  if (!_isPharmacist)
+                                    SizedBox(
+                                      width: cellWidth,
+                                      child: DropdownButtonFormField<String>(
+                                        initialValue: _selectedSellerId,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Staff',
+                                          isDense: true,
                                         ),
-                                        ..._sellerOptions.map(
-                                          (s) => DropdownMenuItem<String>(
-                                            value: s['id'],
-                                            child: Text(
-                                              s['name'] ?? '',
-                                              overflow: TextOverflow.ellipsis,
+                                        isExpanded: true,
+                                        items: [
+                                          const DropdownMenuItem<String>(
+                                            value: null,
+                                            child: Text('All staff'),
+                                          ),
+                                          ..._sellerOptions.map(
+                                            (s) => DropdownMenuItem<String>(
+                                              value: s['id'],
+                                              child: Text(
+                                                s['name'] ?? '',
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                      ],
-                                      onChanged: (value) {
-                                        setState(
-                                          () => _selectedSellerId = value,
-                                        );
-                                        _runSoon();
-                                      },
+                                        ],
+                                        onChanged: (value) {
+                                          setState(
+                                            () => _selectedSellerId = value,
+                                          );
+                                          _runSoon();
+                                        },
+                                      ),
                                     ),
-                                  ),
                                   SizedBox(
                                     width: cellWidth,
                                     child: DropdownButtonFormField<String>(
@@ -937,12 +1221,33 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                           ],
                         ),
                       )
-                    : display.isEmpty
+                    : showInitialTableEmpty
                     ? _EmptyReportState(
-                        hasRun: _rows.isNotEmpty,
-                        message: _rows.isEmpty
-                            ? 'Data loads automatically. Adjust filters above, or use refresh from the app bar.'
-                            : 'No rows match your search. Clear the search box.',
+                        hasRun: false,
+                        message:
+                            'Data loads automatically. Adjust filters above, or use refresh from the app bar.',
+                      )
+                    : showEmptyTableWithSearch
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _reportSearchBarRow(t, cs, display.length),
+                          Expanded(
+                            child: !hasData && filterTrim.isNotEmpty
+                                ? _EmptyReportState(
+                                    hasRun: false,
+                                    title: 'Nothing to show',
+                                    icon: Icons.search_off_rounded,
+                                    message:
+                                        'There is no data for the current filters. Clear the table search or adjust filters above.',
+                                  )
+                                : _EmptyReportState(
+                                    hasRun: true,
+                                    message:
+                                        'No rows match your search. Clear the search box.',
+                                  ),
+                          ),
+                        ],
                       )
                     : Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1142,15 +1447,25 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
 }
 
 class _EmptyReportState extends StatelessWidget {
-  const _EmptyReportState({required this.hasRun, required this.message});
+  const _EmptyReportState({
+    required this.hasRun,
+    required this.message,
+    this.title,
+    this.icon,
+  });
 
   final bool hasRun;
   final String message;
+  final String? title;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final cs = t.colorScheme;
+    final effectiveIcon =
+        icon ?? (hasRun ? Icons.search_off_rounded : Icons.table_rows_rounded);
+    final effectiveTitle = title ?? (hasRun ? 'No matches' : 'No rows yet');
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
@@ -1160,13 +1475,13 @@ class _EmptyReportState extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                hasRun ? Icons.search_off_rounded : Icons.table_rows_rounded,
+                effectiveIcon,
                 size: 48,
                 color: cs.primary.withValues(alpha: 0.55),
               ),
               const SizedBox(height: 14),
               Text(
-                hasRun ? 'No matches' : 'No rows yet',
+                effectiveTitle,
                 textAlign: TextAlign.center,
                 style: t.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w700,

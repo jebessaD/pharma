@@ -24,8 +24,9 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _rows = [];
-  final _typeCtl = TextEditingController();
   final _searchCtl = TextEditingController();
+  /// `null` = all movement types (matches DB `stock_movements.movement_type`).
+  String? _selectedMovementType;
   Timer? _debounce;
   final Set<String> _selectedCategoryIds = <String>{};
 
@@ -69,9 +70,26 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
   @override
   void dispose() {
     _debounce?.cancel();
-    _typeCtl.dispose();
     _searchCtl.dispose();
     super.dispose();
+  }
+
+  static String _movementTypeLabel(String? raw) {
+    switch (raw) {
+      case 'purchase_in':
+        return 'Stock in';
+      case 'sale_out':
+        return 'Sale';
+      case 'adjustment':
+        return 'Adjustment';
+      case null:
+      case '':
+        return '—';
+      default:
+        final s = raw.replaceAll('_', ' ').trim();
+        if (s.isEmpty) return raw;
+        return '${s[0].toUpperCase()}${s.length > 1 ? s.substring(1) : ''}';
+    }
   }
 
   Future<void> _load() async {
@@ -126,13 +144,9 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
 
   List<Map<String, dynamic>> get _filtered {
     var list = _rows;
-    final t = _typeCtl.text.trim().toLowerCase();
-    if (t.isNotEmpty) {
+    if (_selectedMovementType != null) {
       list = list
-          .where(
-            (r) =>
-                (r['movement_type'] as String? ?? '').toLowerCase().contains(t),
-          )
+          .where((r) => r['movement_type'] == _selectedMovementType)
           .toList();
     }
     final s = _searchCtl.text.trim().toLowerCase();
@@ -294,6 +308,7 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
                       const SizedBox(height: 10),
                     ],
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
                           child: TextField(
@@ -308,15 +323,46 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
-                          width: 130,
-                          child: TextField(
-                            controller: _typeCtl,
+                          width: 156,
+                          child: InputDecorator(
                             decoration: const InputDecoration(
                               labelText: 'Type',
-                              hintText: 'sale_out',
                               isDense: true,
+                              contentPadding: EdgeInsetsDirectional.only(
+                                start: 12,
+                                end: 4,
+                                top: 4,
+                                bottom: 4,
+                              ),
+                              border: OutlineInputBorder(),
                             ),
-                            onChanged: (_) => setState(() {}),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<String?>(
+                                value: _selectedMovementType,
+                                isDense: true,
+                                isExpanded: true,
+                                items: const [
+                                  DropdownMenuItem<String?>(
+                                    value: null,
+                                    child: Text('All types'),
+                                  ),
+                                  DropdownMenuItem<String?>(
+                                    value: 'purchase_in',
+                                    child: Text('Stock in'),
+                                  ),
+                                  DropdownMenuItem<String?>(
+                                    value: 'sale_out',
+                                    child: Text('Sale'),
+                                  ),
+                                  DropdownMenuItem<String?>(
+                                    value: 'adjustment',
+                                    child: Text('Adjustment'),
+                                  ),
+                                ],
+                                onChanged: (v) =>
+                                    setState(() => _selectedMovementType = v),
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -359,7 +405,8 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
                           dense: true,
                           title: Text(name),
                           subtitle: Text(
-                            '${r['movement_type']} · $batch · $ts'
+                            '${_movementTypeLabel(r['movement_type'] as String?)} · '
+                            '$batch · $ts'
                             '${r['reason'] != null ? '\n${r['reason']}' : ''}',
                           ),
                           trailing: Text(
@@ -398,7 +445,7 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
                 ListTile(
                   title: const Text('Select categories'),
                   trailing: TextButton(
-                    onPressed: () => setModalState(temp.clear),
+                    onPressed: () => setModalState(() => temp.clear()),
                     child: const Text('Clear'),
                   ),
                 ),

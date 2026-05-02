@@ -1,16 +1,20 @@
-# pharma_app
+# Pharma Shelf (`pharma_app`)
 
-A new Flutter project.
+Flutter app for pharmacy operations (POS, stock, medicines, purchases) used with Supabase.
 
-## Getting Started
+## Development
 
-This project is a starting point for a Flutter application.
+```bash
+flutter pub get
+flutter run
+flutter test
+```
 
-A few resources to get you started if this is your first Flutter project:
+## Production / Play Store
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+- **Operator checklist:** [docs/play_production_checklist.md](docs/play_production_checklist.md) (signing, Supabase, Play policy, symbols).
+- **Release AAB (obfuscated):** `./tool/build_release_appbundle.sh` — optional `REQUIRE_UPLOAD_KEY=1`, optional `tool/dart_defines.local.json` (see [tool/dart_defines.example.json](tool/dart_defines.example.json)).
+- **App size notes:** [docs/android_app_size_baseline.md](docs/android_app_size_baseline.md).
+- **Store listing draft (title, descriptions):** [fastlane/metadata/android/en-US/](fastlane/metadata/android/en-US/).
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Supabase URL and anon key default in code for local dev; override with `--dart-define` or `--dart-define-from-file` for production builds (see [lib/core/supabase_config.dart](lib/core/supabase_config.dart)).

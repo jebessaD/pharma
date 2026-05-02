@@ -25,8 +25,10 @@ class PharmacyHomePage extends ConsumerWidget {
 
   static String _roleTagline(String role) {
     return switch (role) {
-      'cashier' => 'Checkout and receipts — open POS when a customer is ready.',
-      'seller' => 'Checkout and receipts — open POS when a customer is ready.',
+      'cashier' =>
+        'Payments and receipts — use Sell when a customer is ready.',
+      'seller' =>
+        'Payments and receipts — use Sell when a customer is ready.',
       'pharmacist' => 'Stock, batches, and expiry — keep the shelf accurate.',
       'admin' => 'Operations, purchasing, and team — full control from here.',
       'owner' => 'Team ownership and full control — including admin access.',
@@ -206,11 +208,11 @@ class PharmacyHomePage extends ConsumerWidget {
               ),
               _HomeAction(
                 icon: Icons.receipt_long_rounded,
-                label: 'New purchase',
-                subtitle: 'Record an order',
-                path: '/pharmacy/purchases/new',
-                accent: Color(0xFFB45309),
-                accentSoft: Color(0xFFFEF3C7),
+                label: 'Purchases',
+                subtitle: 'Drafts and new stock orders',
+                path: '/pharmacy/purchases',
+                accent: Color(0xFF0D9488),
+                accentSoft: Color(0xFFCCFBF1),
               ),
             ],
           ),
@@ -321,7 +323,7 @@ class PharmacyHomePage extends ConsumerWidget {
                   padding: EdgeInsets.symmetric(horizontal: pad),
                   sliver: SliverToBoxAdapter(
                     child: _PosHeroCard(
-                      emphasizeCheckout: role == 'cashier' || role == 'seller',
+                      emphasizeSell: role == 'cashier' || role == 'seller',
                       onTap: () {
                         HapticFeedback.lightImpact();
                         context.go('/pharmacy/pos');
@@ -728,10 +730,10 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _PosHeroCard extends StatelessWidget {
-  const _PosHeroCard({required this.onTap, this.emphasizeCheckout = false});
+  const _PosHeroCard({required this.onTap, this.emphasizeSell = false});
 
   final VoidCallback onTap;
-  final bool emphasizeCheckout;
+  final bool emphasizeSell;
 
   @override
   Widget build(BuildContext context) {
@@ -750,13 +752,13 @@ class _PosHeroCard extends StatelessWidget {
             ],
     );
 
-    final title = emphasizeCheckout ? 'Open checkout' : 'Point of sale';
-    final headline = emphasizeCheckout
+    final title = emphasizeSell ? 'Open Sell' : 'Sell';
+    final headline = emphasizeSell
         ? 'Sell & print receipt'
-        : 'Ring up sales';
-    final sub = emphasizeCheckout
+        : 'Take payments';
+    final sub = emphasizeSell
         ? 'Cash or mobile — receipt opens after sale.'
-        : 'Fast checkout · Cash & mobile';
+        : 'Fast sales · Cash & mobile';
 
     return Material(
       elevation: isDark ? 0 : 3,
@@ -973,7 +975,7 @@ class _ActionTile extends StatelessWidget {
   }
 }
 
-/// Cashier-only: POS is the job; menu for the rest.
+/// Cashier-only: Sell is the job; menu for the rest.
 class _CashierHomeExtras extends StatelessWidget {
   const _CashierHomeExtras();
 
@@ -1009,7 +1011,7 @@ class _CashierHomeExtras extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Open the menu (top left). Your role is limited to checkout and receipts for security.',
+                        'Open the menu (top left). Your role is limited to Sell and receipts for security.',
                         style: t.textTheme.bodyMedium?.copyWith(
                           color: cs.onSurfaceVariant,
                           height: 1.35,
@@ -1039,7 +1041,7 @@ class _CashierHomeExtras extends StatelessWidget {
                 const SizedBox(width: 14),
                 Expanded(
                   child: Text(
-                    'After a sale, you can open the receipt from POS or from history when your team enables it.',
+                    'After a sale, you can open the receipt from Sell or from history when your team enables it.',
                     style: t.textTheme.bodyMedium?.copyWith(
                       color: cs.onSurfaceVariant,
                       height: 1.35,

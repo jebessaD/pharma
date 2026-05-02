@@ -12,6 +12,7 @@ class AppTextFormField extends StatelessWidget {
     this.maxLines = 1,
     this.textCapitalization = TextCapitalization.none,
     this.inputFormatters,
+    this.onChanged,
   });
 
   final TextEditingController controller;
@@ -22,12 +23,14 @@ class AppTextFormField extends StatelessWidget {
   final int maxLines;
   final TextCapitalization textCapitalization;
   final List<TextInputFormatter>? inputFormatters;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
       validator: validator,
+      onChanged: onChanged,
       keyboardType: keyboardType,
       obscureText: obscureText,
       maxLines: maxLines,

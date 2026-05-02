@@ -22,7 +22,7 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
   List<Map<String, dynamic>> _rows = [];
   String _query = '';
 
-  String? _categoryFilterId;
+  final Set<String> _selectedCategoryIds = <String>{};
   String? _lastBranchId;
 
   @override
@@ -92,6 +92,89 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
     }
   }
 
+  Future<void> _openCategoryFilterSheet(
+    List<Map<String, dynamic>> categories,
+  ) async {
+    final result = await showModalBottomSheet<Set<String>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final temp = Set<String>.from(_selectedCategoryIds);
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final maxH = MediaQuery.sizeOf(context).height * 0.55;
+            return SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    title: const Text('Medicine categories'),
+                    trailing: TextButton(
+                      onPressed: () => setModalState(() => temp.clear()),
+                      child: const Text('Clear'),
+                    ),
+                  ),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxH),
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        for (final c in categories)
+                          CheckboxListTile(
+                            value: temp.contains(c['id']),
+                            title: Text(c['name'] as String? ?? ''),
+                            onChanged: (checked) {
+                              setModalState(() {
+                                final id = c['id'] as String?;
+                                if (id == null) return;
+                                if (checked == true) {
+                                  temp.add(id);
+                                } else {
+                                  temp.remove(id);
+                                }
+                              });
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () =>
+                                Navigator.pop(ctx, Set<String>.from(temp)),
+                            child: const Text('Apply'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (result != null && mounted) {
+      setState(() {
+        _selectedCategoryIds
+          ..clear()
+          ..addAll(result);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final categoriesAsync = ref.watch(activeBranchMedicineCategoriesProvider);
@@ -101,7 +184,7 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
       _lastBranchId = branchId;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        setState(() => _categoryFilterId = null);
+        setState(_selectedCategoryIds.clear);
         _load();
       });
     }
@@ -160,11 +243,9 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                             .contains(q);
                       })
                       .where((m) {
-                        if (_categoryFilterId == null ||
-                            _categoryFilterId!.isEmpty) {
-                          return true;
-                        }
-                        return m['category_id'] == _categoryFilterId;
+                        if (_selectedCategoryIds.isEmpty) return true;
+                        final id = m['category_id'] as String?;
+                        return id != null && _selectedCategoryIds.contains(id);
                       })
                       .toList();
                   return CustomScrollView(
@@ -204,44 +285,31 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                               ),
                               const SizedBox(height: 8),
                               categoriesAsync.when(
-                                data: (categories) =>
-                                    DropdownButtonFormField<String>(
-                                      initialValue: _categoryFilterId ?? '',
-                                      decoration: InputDecoration(
-                                        labelText: 'Category',
-                                        filled: true,
-                                        fillColor: cs.surfaceContainerHighest
-                                            .withValues(alpha: 0.2),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide(
-                                            color: cs.outlineVariant,
-                                          ),
-                                        ),
-                                      ),
-                                      items: [
-                                        const DropdownMenuItem<String>(
-                                          value: '',
-                                          child: Text('All categories'),
-                                        ),
-                                        ...categories.map(
-                                          (c) => DropdownMenuItem<String>(
-                                            value: c['id'] as String,
-                                            child: Text(
-                                              c['name'] as String? ?? '',
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                      onChanged: (value) => setState(
-                                        () => _categoryFilterId =
-                                            (value == null || value.isEmpty)
-                                            ? null
-                                            : value,
-                                      ),
+                                data: (categories) {
+                                  final list = categories
+                                      .map((c) => Map<String, dynamic>.from(c))
+                                      .toList();
+                                  return ListTile(
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 0,
                                     ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      side: BorderSide(color: cs.outlineVariant),
+                                    ),
+                                    title: const Text('Medicine categories'),
+                                    subtitle: Text(
+                                      _selectedCategoryIds.isEmpty
+                                          ? 'All categories'
+                                          : '${_selectedCategoryIds.length} selected',
+                                    ),
+                                    trailing: const Icon(
+                                      Icons.checklist_rounded,
+                                    ),
+                                    onTap: () => _openCategoryFilterSheet(list),
+                                  );
+                                },
                                 loading: () => const LinearProgressIndicator(),
                                 error: (error, stackTrace) =>
                                     const Text('Category filter unavailable'),

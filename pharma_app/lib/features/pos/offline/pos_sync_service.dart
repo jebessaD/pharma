@@ -67,11 +67,27 @@ class PosSyncService {
       return null;
     }
     notifier.markSyncing();
-    final syncedId = await _syncOne(sale);
-    await _repo.clearSynced();
-    notifier.updatePending(await _repo.pendingCount());
-    notifier.markSyncedNow();
-    return syncedId;
+    try {
+      final syncedId = await _syncOne(sale);
+      await _repo.clearSynced();
+      notifier.updatePending(await _repo.pendingCount());
+      notifier.markSyncedNow();
+      return syncedId;
+    } catch (e) {
+      notifier.updatePending(await _repo.pendingCount());
+      notifier.markFailed(userFacingError(e));
+      rethrow;
+    } finally {
+      if (_ref.read(syncStatusProvider).state == SyncState.syncing) {
+        final n = _ref.read(syncStatusProvider.notifier);
+        try {
+          n.updatePending(await _repo.pendingCount());
+        } catch (_) {
+          /* best-effort */
+        }
+        n.markIdle();
+      }
+    }
   }
 
   bool _isTransient(Object error) {
@@ -146,7 +162,6 @@ class PosSyncService {
         lastError: userFacingError(error),
       );
       await _repo.update(failed);
-      if (!transient) rethrow;
       return null;
     }
   }

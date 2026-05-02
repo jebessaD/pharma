@@ -109,7 +109,7 @@ String _userFacingFunction(FunctionException e) {
     return 'The selected role is not allowed.';
   }
   if (lower == 'username_taken') {
-    return 'This username is already taken on your team. Pick another.';
+    return 'This username is already taken (it may be in use by another pharmacy). Pick another.';
   }
   if (lower == 'invalid_username' || lower == 'missing_username') {
     return 'Enter a valid username (3–32 characters: letters, numbers, underscores).';
@@ -119,6 +119,9 @@ String _userFacingFunction(FunctionException e) {
   }
   if (lower == 'password_too_short') {
     return 'Password must be at least 8 characters.';
+  }
+  if (lower == 'branch_access_denied') {
+    return 'You don\'t have access to this branch. Contact your administrator.';
   }
   if (lower == 'ambiguous_username') {
     return 'That username exists on more than one pharmacy. Sign in with the full email instead.';
@@ -190,6 +193,9 @@ String _userFacingPostgrest(PostgrestException e) {
   if (e.code == '23505' || m.contains('duplicate') || m.contains('unique')) {
     return 'This record already exists. Use a different value.';
   }
+  if (m.contains('branch_access_denied')) {
+    return 'You don\'t have access to this branch. Contact your administrator.';
+  }
   if (m.contains('billing_blocked')) {
     return 'This account cannot record changes until billing is resolved. Contact support or your owner.';
   }
@@ -225,6 +231,33 @@ String _userFacingPostgrest(PostgrestException e) {
   }
   if (m.contains('bad_branch')) {
     return 'That branch is not valid for your team.';
+  }
+  if (m.contains('team_not_found')) {
+    return 'Your pharmacy team could not be found. Sign out and sign in again, or contact support.';
+  }
+  if (m.contains('no_profile')) {
+    return 'No active pharmacy profile for this account. Ask an administrator to restore your access.';
+  }
+  if (m.contains('bad_qty')) {
+    return 'Each line needs a quantity greater than zero.';
+  }
+  if (m.contains('bad_price')) {
+    return 'Each line needs a valid unit price (zero or greater).';
+  }
+  if (m.contains('batch_not_found')) {
+    return 'A batch on this sale was not found for this branch. Refresh stock and try again.';
+  }
+  if (m.contains('bad_discount')) {
+    return 'Discount is too large for this cart. Reduce the discount.';
+  }
+  if (m.contains('missing_list_price')) {
+    return 'A medicine is missing a list price. Set selling price in inventory, then try again.';
+  }
+  if (m.contains('cashier_price_override_out_of_range')) {
+    return 'Unit price must stay within 5% of the list price for your role, or add an override reason if allowed.';
+  }
+  if (m.contains('forbidden')) {
+    return 'You do not have permission for this action.';
   }
   if (e.message.length < 200 &&
       !m.contains('relation') &&

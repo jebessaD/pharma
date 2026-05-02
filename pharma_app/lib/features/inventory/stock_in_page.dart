@@ -19,17 +19,24 @@ class _BulkLine {
   _BulkLine()
     : batchNo = TextEditingController(),
       qty = TextEditingController(),
-      expiry = TextEditingController();
+      expiry = TextEditingController(),
+      unitCost = TextEditingController(),
+      sellPrice = TextEditingController();
 
   String? medicineId;
   final TextEditingController batchNo;
   final TextEditingController qty;
   final TextEditingController expiry;
+  /// Optional override; when empty, server uses previous batch or medicine default.
+  final TextEditingController unitCost;
+  final TextEditingController sellPrice;
 
   void dispose() {
     batchNo.dispose();
     qty.dispose();
     expiry.dispose();
+    unitCost.dispose();
+    sellPrice.dispose();
   }
 }
 
@@ -56,6 +63,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
   final _batchNo = TextEditingController();
   final _expiry = TextEditingController();
   final _qty = TextEditingController();
+  final _singleUnitCost = TextEditingController();
+  final _singleSellPrice = TextEditingController();
   final _singleLookupFocus = FocusNode();
   List<Map<String, dynamic>> _medicines = [];
   String? _selectedMedicineId;
@@ -90,6 +99,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
       l.batchNo.addListener(_syncDirtyState);
       l.qty.addListener(_syncDirtyState);
       l.expiry.addListener(_syncDirtyState);
+      l.unitCost.addListener(_syncDirtyState);
+      l.sellPrice.addListener(_syncDirtyState);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -114,6 +125,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
     _batchNo.dispose();
     _expiry.dispose();
     _qty.dispose();
+    _singleUnitCost.dispose();
+    _singleSellPrice.dispose();
     _singleLookupFocus.dispose();
     for (final l in _bulkLines) {
       l.dispose();
@@ -135,14 +148,18 @@ class _StockInPageState extends ConsumerState<StockInPage>
       _selectedMedicineId != null ||
       _batchNo.text.trim().isNotEmpty ||
       _expiry.text.trim().isNotEmpty ||
-      _qty.text.trim().isNotEmpty;
+      _qty.text.trim().isNotEmpty ||
+      _singleUnitCost.text.trim().isNotEmpty ||
+      _singleSellPrice.text.trim().isNotEmpty;
 
   bool get _bulkDirty => _bulkLines.any(
     (l) =>
         l.medicineId != null ||
         l.batchNo.text.trim().isNotEmpty ||
         l.qty.text.trim().isNotEmpty ||
-        l.expiry.text.trim().isNotEmpty,
+        l.expiry.text.trim().isNotEmpty ||
+        l.unitCost.text.trim().isNotEmpty ||
+        l.sellPrice.text.trim().isNotEmpty,
   );
 
   void _syncDirtyState() {
@@ -160,11 +177,15 @@ class _StockInPageState extends ConsumerState<StockInPage>
     _bulkLines.first.batchNo.addListener(_syncDirtyState);
     _bulkLines.first.qty.addListener(_syncDirtyState);
     _bulkLines.first.expiry.addListener(_syncDirtyState);
+    _bulkLines.first.unitCost.addListener(_syncDirtyState);
+    _bulkLines.first.sellPrice.addListener(_syncDirtyState);
     setState(() {
       _selectedMedicineId = null;
       _batchNo.clear();
       _expiry.clear();
       _qty.clear();
+      _singleUnitCost.clear();
+      _singleSellPrice.clear();
       _lookupMatches = [];
       _lookupTarget = null;
       _lookupBulkIndex = null;
@@ -195,7 +216,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
       }
       final data = await Supabase.instance.client
           .from('medicines')
-          .select('id, name, manual_code, barcode, generic_name')
+          .select('id, name, manual_code, barcode, generic_name, purchase_price, selling_price')
           .eq('team_id', teamId)
           .eq('branch_id', branchId)
           .eq('is_active', true)
@@ -209,6 +230,72 @@ class _StockInPageState extends ConsumerState<StockInPage>
       setState(() => _error = 'Unable to load medicine list. Try again.');
     } finally {
       if (mounted) setState(() => _bootstrapping = false);
+    }
+  }
+
+  /// Unit cost for a new batch: parsed field text, else medicine `purchase_price`.
+  num _resolvedUnitCostForMedicine({
+    required String medicineId,
+    required String fieldText,
+  }) {
+    final parsed = num.tryParse(fieldText.trim());
+    if (parsed != null) return parsed;
+    final med = _medicines.cast<Map<String, dynamic>?>().firstWhere(
+      (m) => m?['id'] == medicineId,
+      orElse: () => null,
+    );
+    final pp = med?['purchase_price'];
+    if (pp is num) return pp;
+    if (pp != null) return num.tryParse('$pp') ?? 0;
+    return 0;
+  }
+
+  num _resolvedSellPriceForMedicine({
+    required String medicineId,
+    required String fieldText,
+  }) {
+    final parsed = num.tryParse(fieldText.trim());
+    if (parsed != null) return parsed;
+    final med = _medicines.cast<Map<String, dynamic>?>().firstWhere(
+      (m) => m?['id'] == medicineId,
+      orElse: () => null,
+    );
+    final sp = med?['selling_price'];
+    if (sp is num) return sp;
+    if (sp != null) return num.tryParse('$sp') ?? 0;
+    return 0;
+  }
+
+  /// Fetch previous batch prices (unit_cost_base, sell_price_base) for a medicine
+  /// at the current branch and pre-fill the given controllers.
+  Future<void> _inheritPreviousBatchPrices({
+    required String medicineId,
+    required TextEditingController unitCostCtl,
+    required TextEditingController sellPriceCtl,
+  }) async {
+    final branchId = ref.read(selectedBranchIdProvider);
+    if (branchId == null) return;
+    try {
+      final rows = await Supabase.instance.client
+          .from('medicine_batches')
+          .select('unit_cost_base, sell_price_base')
+          .eq('medicine_id', medicineId)
+          .eq('branch_id', branchId)
+          .order('created_at', ascending: false)
+          .limit(1);
+      final list = List<Map<String, dynamic>>.from(rows as List);
+      if (list.isEmpty || !mounted) return;
+      final prev = list.first;
+      if (unitCostCtl.text.trim().isEmpty) {
+        final uc = prev['unit_cost_base'];
+        if (uc != null) unitCostCtl.text = '$uc';
+      }
+      if (sellPriceCtl.text.trim().isEmpty) {
+        final sp = prev['sell_price_base'];
+        if (sp != null) sellPriceCtl.text = '$sp';
+      }
+    } catch (_) {
+      // Non-critical; fallback to medicine defaults in _resolvedXxx methods.
     }
   }
 
@@ -253,6 +340,14 @@ class _StockInPageState extends ConsumerState<StockInPage>
       _error = null;
     });
     try {
+      final unitCost = _resolvedUnitCostForMedicine(
+        medicineId: mid,
+        fieldText: _singleUnitCost.text,
+      );
+      final sellPrice = _resolvedSellPriceForMedicine(
+        medicineId: mid,
+        fieldText: _singleSellPrice.text,
+      );
       final ins = await Supabase.instance.client
           .from('medicine_batches')
           .insert({
@@ -264,6 +359,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
                 : _batchNo.text.trim(),
             'expiry_date': iso,
             'quantity_in_base_unit': 0,
+            'unit_cost_base': unitCost,
+            'sell_price_base': sellPrice,
           })
           .select('id')
           .single();
@@ -290,6 +387,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
           _batchNo.clear();
           _expiry.clear();
           _qty.clear();
+          _singleUnitCost.clear();
+          _singleSellPrice.clear();
           _lookupMatches = [];
           _lookupTarget = null;
           _lookupBulkIndex = null;
@@ -383,8 +482,6 @@ class _StockInPageState extends ConsumerState<StockInPage>
     final generic = TextEditingController();
     final code = TextEditingController();
     final barcode = TextEditingController();
-    final purchase = TextEditingController(text: '0');
-    final selling = TextEditingController(text: '0');
     String? categoryId = categories.first['id'] as String?;
     var saving = false;
     String? dialogError;
@@ -433,40 +530,6 @@ class _StockInPageState extends ConsumerState<StockInPage>
                           controller: barcode,
                           decoration: const InputDecoration(
                             labelText: 'Barcode (optional)',
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextFormField(
-                          controller: purchase,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(
-                              RegExp(r'[0-9.]'),
-                            ),
-                          ],
-                          decoration: const InputDecoration(
-                            labelText: 'Purchase price',
-                          ),
-                          validator: (v) => FormValidators.nonNegativeNumber(
-                            v,
-                            label: 'Purchase price',
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextFormField(
-                          controller: selling,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(
-                              RegExp(r'[0-9.]'),
-                            ),
-                          ],
-                          decoration: const InputDecoration(
-                            labelText: 'Selling price',
-                          ),
-                          validator: (v) => FormValidators.nonNegativeNumber(
-                            v,
-                            label: 'Selling price',
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -537,13 +600,11 @@ class _StockInPageState extends ConsumerState<StockInPage>
                                       ? null
                                       : barcode.text.trim(),
                                   'category_id': categoryId,
-                                  'purchase_price':
-                                      num.tryParse(purchase.text.trim()) ?? 0,
-                                  'selling_price':
-                                      num.tryParse(selling.text.trim()) ?? 0,
+                                  'purchase_price': 0,
+                                  'selling_price': 0,
                                 })
                                 .select(
-                                  'id, name, manual_code, barcode, generic_name',
+                                  'id, name, manual_code, barcode, generic_name, purchase_price, selling_price',
                                 )
                                 .single();
                             if (!dialogContext.mounted) return;
@@ -590,10 +651,18 @@ class _StockInPageState extends ConsumerState<StockInPage>
       _lookupBulkIndex = null;
       if (target == _LookupTarget.single) {
         _selectedMedicineId = createdId;
+        final pp = created['purchase_price'];
+        if (pp != null) _singleUnitCost.text = '$pp';
+        final sp = created['selling_price'];
+        if (sp != null) _singleSellPrice.text = '$sp';
       } else {
         final idx = bulkIndex ?? _activeBulkIndex;
         if (idx >= 0 && idx < _bulkLines.length) {
           _bulkLines[idx].medicineId = createdId;
+          final pp = created['purchase_price'];
+          if (pp != null) _bulkLines[idx].unitCost.text = '$pp';
+          final sp = created['selling_price'];
+          if (sp != null) _bulkLines[idx].sellPrice.text = '$sp';
           _activeBulkIndex = idx;
         }
       }
@@ -610,6 +679,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
       n.batchNo.addListener(_syncDirtyState);
       n.qty.addListener(_syncDirtyState);
       n.expiry.addListener(_syncDirtyState);
+      n.unitCost.addListener(_syncDirtyState);
+      n.sellPrice.addListener(_syncDirtyState);
       _bulkLines.add(n);
       _activeBulkIndex = _bulkLines.length - 1;
     });
@@ -626,6 +697,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
         n.batchNo.addListener(_syncDirtyState);
         n.qty.addListener(_syncDirtyState);
         n.expiry.addListener(_syncDirtyState);
+        n.unitCost.addListener(_syncDirtyState);
+        n.sellPrice.addListener(_syncDirtyState);
         _bulkLines.add(n);
         _activeBulkIndex = _bulkLines.length - 1;
       }
@@ -664,6 +737,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
         n.batchNo.addListener(_syncDirtyState);
         n.qty.addListener(_syncDirtyState);
         n.expiry.addListener(_syncDirtyState);
+        n.unitCost.addListener(_syncDirtyState);
+        n.sellPrice.addListener(_syncDirtyState);
         _bulkLines.add(n);
       }
     });
@@ -697,9 +772,17 @@ class _StockInPageState extends ConsumerState<StockInPage>
         ..batchNo.text = parts[1]
         ..expiry.text = parts[2]
         ..qty.text = parts[3];
+      if (parts.length >= 5) {
+        line.unitCost.text = parts[4];
+      }
+      if (parts.length >= 6) {
+        line.sellPrice.text = parts[5];
+      }
       line.batchNo.addListener(_syncDirtyState);
       line.qty.addListener(_syncDirtyState);
       line.expiry.addListener(_syncDirtyState);
+      line.unitCost.addListener(_syncDirtyState);
+      line.sellPrice.addListener(_syncDirtyState);
       setState(() => _bulkLines.add(line));
       inserted++;
     }
@@ -718,10 +801,14 @@ class _StockInPageState extends ConsumerState<StockInPage>
       ..medicineId = src.medicineId
       ..batchNo.text = src.batchNo.text
       ..qty.text = src.qty.text
-      ..expiry.text = src.expiry.text;
+      ..expiry.text = src.expiry.text
+      ..unitCost.text = src.unitCost.text
+      ..sellPrice.text = src.sellPrice.text;
     copy.batchNo.addListener(_syncDirtyState);
     copy.qty.addListener(_syncDirtyState);
     copy.expiry.addListener(_syncDirtyState);
+    copy.unitCost.addListener(_syncDirtyState);
+    copy.sellPrice.addListener(_syncDirtyState);
     setState(() {
       _bulkLines.insert(i + 1, copy);
       _activeBulkIndex = i + 1;
@@ -751,6 +838,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
     _bulkLines.first.batchNo.addListener(_syncDirtyState);
     _bulkLines.first.qty.addListener(_syncDirtyState);
     _bulkLines.first.expiry.addListener(_syncDirtyState);
+    _bulkLines.first.unitCost.addListener(_syncDirtyState);
+    _bulkLines.first.sellPrice.addListener(_syncDirtyState);
     setState(() {
       _activeBulkIndex = 0;
       _lookupMatches = [];
@@ -836,12 +925,17 @@ class _StockInPageState extends ConsumerState<StockInPage>
         skipped++;
         continue;
       }
-      items.add({
+      final row = <String, dynamic>{
         'medicine_id': mid,
         if (bn.isNotEmpty) 'batch_no': bn,
         'expiry_date': iso,
         'qty': q,
-      });
+      };
+      final uc = num.tryParse(l.unitCost.text.trim());
+      if (uc != null) row['unit_cost'] = uc;
+      final sp = num.tryParse(l.sellPrice.text.trim());
+      if (sp != null) row['sell_price'] = sp;
+      items.add(row);
     }
     if (items.isEmpty) {
       setState(
@@ -948,10 +1042,27 @@ class _StockInPageState extends ConsumerState<StockInPage>
     setState(() {
       if (target == _LookupTarget.single) {
         _selectedMedicineId = id;
+        if (_singleUnitCost.text.trim().isEmpty) {
+          final pp = row['purchase_price'];
+          if (pp != null) _singleUnitCost.text = '$pp';
+        }
+        if (_singleSellPrice.text.trim().isEmpty) {
+          final sp = row['selling_price'];
+          if (sp != null) _singleSellPrice.text = '$sp';
+        }
       } else {
         final idx = bulkIndex ?? _activeBulkIndex;
         if (idx >= 0 && idx < _bulkLines.length) {
-          _bulkLines[idx].medicineId = id;
+          final line = _bulkLines[idx];
+          line.medicineId = id;
+          if (line.unitCost.text.trim().isEmpty) {
+            final pp = row['purchase_price'];
+            if (pp != null) line.unitCost.text = '$pp';
+          }
+          if (line.sellPrice.text.trim().isEmpty) {
+            final sp = row['selling_price'];
+            if (sp != null) line.sellPrice.text = '$sp';
+          }
           _activeBulkIndex = idx;
         }
       }
@@ -962,9 +1073,19 @@ class _StockInPageState extends ConsumerState<StockInPage>
     });
     _syncDirtyState();
     if (target == _LookupTarget.bulk) {
+      _inheritPreviousBatchPrices(
+        medicineId: id,
+        unitCostCtl: _bulkLines[bulkIndex ?? _activeBulkIndex].unitCost,
+        sellPriceCtl: _bulkLines[bulkIndex ?? _activeBulkIndex].sellPrice,
+      );
       _focusNextBulkRowAfterLookup();
       return;
     }
+    _inheritPreviousBatchPrices(
+      medicineId: id,
+      unitCostCtl: _singleUnitCost,
+      sellPriceCtl: _singleSellPrice,
+    );
     if (focusAfterApply != null) {
       focusAfterApply.requestFocus();
     }
@@ -1024,8 +1145,24 @@ class _StockInPageState extends ConsumerState<StockInPage>
             initialMedicineId: _selectedMedicineId,
             label: 'Search medicine',
             onPicked: (row) {
-              setState(() => _selectedMedicineId = row['id'] as String);
+              final id = row['id'] as String;
+              setState(() {
+                _selectedMedicineId = id;
+                if (_singleUnitCost.text.trim().isEmpty) {
+                  final pp = row['purchase_price'];
+                  if (pp != null) _singleUnitCost.text = '$pp';
+                }
+                if (_singleSellPrice.text.trim().isEmpty) {
+                  final sp = row['selling_price'];
+                  if (sp != null) _singleSellPrice.text = '$sp';
+                }
+              });
               _syncDirtyState();
+              _inheritPreviousBatchPrices(
+                medicineId: id,
+                unitCostCtl: _singleUnitCost,
+                sellPriceCtl: _singleSellPrice,
+              );
             },
           ),
           const SizedBox(height: 8),
@@ -1076,6 +1213,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
                       onPressed: () {
                         setState(() {
                           _selectedMedicineId = null;
+                          _singleUnitCost.clear();
+                          _singleSellPrice.clear();
                         });
                         _syncDirtyState();
                       },
@@ -1348,8 +1487,24 @@ class _StockInPageState extends ConsumerState<StockInPage>
                 initialMedicineId: line.medicineId,
                 label: 'Medicine',
                 onPicked: (row) {
-                  setState(() => line.medicineId = row['id'] as String);
+                  final id = row['id'] as String;
+                  setState(() {
+                    line.medicineId = id;
+                    if (line.unitCost.text.trim().isEmpty) {
+                      final pp = row['purchase_price'];
+                      if (pp != null) line.unitCost.text = '$pp';
+                    }
+                    if (line.sellPrice.text.trim().isEmpty) {
+                      final sp = row['selling_price'];
+                      if (sp != null) line.sellPrice.text = '$sp';
+                    }
+                  });
                   _syncDirtyState();
+                  _inheritPreviousBatchPrices(
+                    medicineId: id,
+                    unitCostCtl: line.unitCost,
+                    sellPriceCtl: line.sellPrice,
+                  );
                 },
               ),
               const SizedBox(height: 8),
@@ -1410,6 +1565,36 @@ class _StockInPageState extends ConsumerState<StockInPage>
                     icon: const Icon(Icons.add),
                   ),
                 ],
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: line.unitCost,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}$')),
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'Purchase cost (optional)',
+                  helperText: 'Inherits from last batch if blank',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: line.sellPrice,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}$')),
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'Sell price (optional)',
+                  helperText: 'POS default for this batch',
+                ),
+                onChanged: (_) => setState(() {}),
               ),
             ],
           ),
@@ -1531,6 +1716,40 @@ class _StockInPageState extends ConsumerState<StockInPage>
                               }
                               return null;
                             },
+                          ),
+                          const SizedBox(height: 10),
+                          TextFormField(
+                            controller: _singleUnitCost,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*\.?\d{0,2}$'),
+                              ),
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'Purchase cost (base unit)',
+                              helperText:
+                                  'Inherits from last batch; edit if this batch differs',
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextFormField(
+                            controller: _singleSellPrice,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*\.?\d{0,2}$'),
+                              ),
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'Sell price (base unit)',
+                              helperText:
+                                  'Used as default at POS for this batch',
+                            ),
                           ),
                           const SizedBox(height: 18),
                           FilledButton.icon(

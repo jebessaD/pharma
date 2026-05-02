@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
+import '../../core/providers/pharmacy_profile_provider.dart';
 
 class _ReportCard {
   const _ReportCard({
@@ -26,69 +29,77 @@ class _ReportSection {
   final List<_ReportCard> items;
 }
 
-class ReportsHomePage extends StatelessWidget {
+class ReportsHomePage extends ConsumerWidget {
   const ReportsHomePage({super.key});
 
-  static const _sections = <_ReportSection>[
-    _ReportSection(
-      title: 'Core reports',
-      items: [
-        _ReportCard(
-          title: 'Sales report',
-          subtitle: 'What sold, who sold, amount, discount and payment',
-          path: '/pharmacy/reports/sales_unified',
-          icon: Icons.receipt_long_rounded,
-          accent: Color(0xFF2563EB),
-          accentSoft: Color(0xFFDBEAFE),
-        ),
-        _ReportCard(
-          title: 'Profit summary',
-          subtitle: 'Revenue, COGS, gross profit and margin',
-          path: '/pharmacy/reports/profit_summary',
-          icon: Icons.trending_up_rounded,
-          accent: Color(0xFF7C3AED),
-          accentSoft: Color(0xFFEDE9FE),
-        ),
-      ],
+  static const _coreReportsAll = <_ReportCard>[
+    _ReportCard(
+      title: 'Sales report',
+      subtitle: 'What sold, who sold, amount, discount and payment',
+      path: '/pharmacy/reports/sales_unified',
+      icon: Icons.receipt_long_rounded,
+      accent: Color(0xFF2563EB),
+      accentSoft: Color(0xFFDBEAFE),
     ),
-    _ReportSection(
-      title: 'Inventory reports',
-      items: [
-        _ReportCard(
-          title: 'Stock balance',
-          subtitle: 'Current quantity by medicine batch',
-          path: '/pharmacy/reports/stock_balance',
-          icon: Icons.inventory_2_rounded,
-          accent: Color(0xFF0D9488),
-          accentSoft: Color(0xFFCCFBF1),
-        ),
-        _ReportCard(
-          title: 'Expiry status',
-          subtitle: 'Near-expiry and expired batches',
-          path: '/pharmacy/reports/expiry_status',
-          icon: Icons.event_busy_rounded,
-          accent: Color(0xFFDC2626),
-          accentSoft: Color(0xFFFEE2E2),
-        ),
-      ],
+    _ReportCard(
+      title: 'Profit summary',
+      subtitle: 'Revenue, COGS, gross profit and margin',
+      path: '/pharmacy/reports/profit_summary',
+      icon: Icons.trending_up_rounded,
+      accent: Color(0xFF7C3AED),
+      accentSoft: Color(0xFFEDE9FE),
     ),
-    _ReportSection(
-      title: 'Trend reports',
-      items: [
-        _ReportCard(
-          title: 'Sales trend',
-          subtitle: 'Sales and profit trend (day, month, year)',
-          path: '/pharmacy/reports/sales_trend',
-          icon: Icons.calendar_month_rounded,
-          accent: Color(0xFFEA580C),
-          accentSoft: Color(0xFFFFEDD5),
-        ),
-      ],
+  ];
+
+  static const _inventoryReports = <_ReportCard>[
+    _ReportCard(
+      title: 'Stock balance',
+      subtitle: 'Current quantity by medicine batch',
+      path: '/pharmacy/reports/stock_balance',
+      icon: Icons.inventory_2_rounded,
+      accent: Color(0xFF0D9488),
+      accentSoft: Color(0xFFCCFBF1),
+    ),
+    _ReportCard(
+      title: 'Expiry status',
+      subtitle: 'Near-expiry and expired batches',
+      path: '/pharmacy/reports/expiry_status',
+      icon: Icons.event_busy_rounded,
+      accent: Color(0xFFDC2626),
+      accentSoft: Color(0xFFFEE2E2),
+    ),
+  ];
+
+  static const _trendReports = <_ReportCard>[
+    _ReportCard(
+      title: 'Sales trend',
+      subtitle: 'Sales and profit trend (day, month, year)',
+      path: '/pharmacy/reports/sales_trend',
+      icon: Icons.calendar_month_rounded,
+      accent: Color(0xFFEA580C),
+      accentSoft: Color(0xFFFFEDD5),
     ),
   ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final role = (ref.watch(pharmacyProfileProvider).asData?.value?['role'] as String? ??
+            '')
+        .trim()
+        .toLowerCase();
+    final isPharmacist = role == 'pharmacist';
+
+    final sections = <_ReportSection>[
+      _ReportSection(
+        title: 'Core reports',
+        items: isPharmacist
+            ? _coreReportsAll.where((c) => c.path != '/pharmacy/reports/profit_summary').toList()
+            : _coreReportsAll,
+      ),
+      _ReportSection(title: 'Inventory reports', items: _inventoryReports),
+      if (!isPharmacist) _ReportSection(title: 'Trend reports', items: _trendReports),
+    ];
+
     final t = Theme.of(context);
     final cs = t.colorScheme;
     return CustomScrollView(
@@ -119,7 +130,7 @@ class ReportsHomePage extends StatelessWidget {
             ),
           ),
         ),
-        for (final section in _sections) ...[
+        for (final section in sections) ...[
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
             sliver: SliverToBoxAdapter(

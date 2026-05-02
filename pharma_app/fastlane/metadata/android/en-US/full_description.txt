@@ -1,0 +1,31 @@
+Pharma Shelf helps pharmacy teams in Ethiopia run day-to-day operations from one place: point of sale, stock and inventory, medicines, purchases, suppliers, and team tools. Keep branches aligned, reduce manual errors, and move faster at the counter and in the back office—without juggling spreadsheets and paper trails.
+
+WHO IT IS FOR
+
+Owners and administrators setting up the pharmacy, branches, and staff. Counter staff handling sales and lookups. Back-office teams receiving stock, recording purchases, and staying ahead of expiry and low stock. If your workflow spans more than one location, the app is built around organisation accounts, roles, and branch context—not a single-device toy till.
+
+REAL PHARMACY WORKFLOWS
+
+Whether you are tracking batches and expiry, managing low stock, reconciling movements, or ringing up sales, Pharma Shelf is built for pharmacy operations—not generic retail. Medicines, packs, and stock semantics match how shelves and dispensaries actually work day to day.
+
+WHAT YOU CAN DO IN THE APP
+
+Features grow over time; this list reflects the direction of the product today:
+
+• Point of sale (POS): fast checkout flows and receipts; catalog search tied to branch stock where applicable
+• Offline-aware POS: after an initial online session, many flows can queue sales when connectivity drops and sync when you are back online (availability depends on cache and network)
+• Stock and inventory: balances, stock-in, movements, and visibility into what is running low
+• Medicines: catalog and medicine management; barcode-friendly flows where device scanning is available
+• Purchases and suppliers: purchase workflows, drafts, and supplier records to support receiving and costing discipline
+• Organisation: team profile, branches (“locations”), and staff aligned to how your pharmacy is structured
+• Reports and summaries: operational views to support decisions (exact reports depend on your account and release)
+• Audit and activity: trails that help supervisors see what changed and when—useful for accountability in busy shops
+• Notifications: stay informed about operational signals your organisation configures
+
+GETTING STARTED
+
+Pharma Shelf is intended for teams: you sign in with credentials your organisation provides (or create a pharmacy through the app’s signup flow where enabled). Pick the right branch for the shift, then use POS, stock, and back-office tools from the same install.
+
+WHY PHARMA SHELF
+
+Mobile-first tools that respect multi-branch reality. Messaging and priorities tuned to pharmacy operations in Ethiopia. Continuous improvements to stability, clarity, and depth—share feedback from the Play listing or through your team admin so we can prioritise what matters on the shelf and at the register.

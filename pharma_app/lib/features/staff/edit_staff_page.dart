@@ -29,7 +29,6 @@ class _EditStaffPageState extends ConsumerState<EditStaffPage> {
   String? _error;
   String? _teamId;
   String? _username;
-  String? _teamName;
   String? _viewerRole;
 
   /// From Auth (admin-get-user-email); preferred for sharing with staff.
@@ -47,18 +46,60 @@ class _EditStaffPageState extends ConsumerState<EditStaffPage> {
     super.dispose();
   }
 
+  bool get _roleLockedOwner => _role == 'owner';
+
+  List<DropdownMenuItem<String>> _dedupeRoleItems(
+    List<DropdownMenuItem<String>> items,
+  ) {
+    final seen = <String>{};
+    final out = <DropdownMenuItem<String>>[];
+    for (final item in items) {
+      final v = item.value;
+      if (v == null) continue;
+      if (seen.add(v)) out.add(item);
+    }
+    return out;
+  }
+
+  List<DropdownMenuItem<String>> _roleDropdownItems() {
+    if (_roleLockedOwner) {
+      return _dedupeRoleItems(const [
+        DropdownMenuItem(value: 'owner', child: Text('Owner')),
+      ]);
+    }
+    final items = <DropdownMenuItem<String>>[
+      if (_viewerRole == 'owner' || _role == 'admin')
+        const DropdownMenuItem(value: 'admin', child: Text('Admin')),
+      const DropdownMenuItem(
+        value: 'pharmacist',
+        child: Text('Pharmacist'),
+      ),
+      const DropdownMenuItem(
+        value: 'seller',
+        child: Text('Seller (counter)'),
+      ),
+    ];
+    final values = items.map((e) => e.value).whereType<String>().toSet();
+    if (!values.contains(_role)) {
+      final raw = _role.trim();
+      final label = raw.isEmpty
+          ? 'Role'
+          : '${raw[0].toUpperCase()}${raw.substring(1).toLowerCase()}';
+      items.insert(
+        0,
+        DropdownMenuItem<String>(value: _role, child: Text(label)),
+      );
+    }
+    return _dedupeRoleItems(items);
+  }
+
   String? get _displaySignInEmail {
     if (_authEmail != null && _authEmail!.trim().isNotEmpty) {
       return _authEmail!.trim();
     }
     final u = _username;
-    final tid = _teamId;
-    if (u != null && u.isNotEmpty && tid != null && tid.isNotEmpty) {
-      return staffSignInEmail(
-        username: u,
-        teamName: _teamName ?? '',
-        teamId: tid,
-      );
+    if (u != null && u.isNotEmpty) {
+      return staffSignInEmail(username: u);
     }
     return null;
   }
@@ -91,22 +132,19 @@ class _EditStaffPageState extends ConsumerState<EditStaffPage> {
             .select('role')
             .eq('id', viewerId)
             .maybeSingle();
-        _viewerRole = viewer?['role'] as String?;
+        _viewerRole =
+            (viewer?['role'] as String?)?.trim().toLowerCase();
       }
       final row = await Supabase.instance.client
           .from('profiles')
-          .select('full_name, role, is_active, username, team_id, teams(name)')
+          .select('full_name, role, is_active, username, team_id')
           .eq('id', widget.staffId)
           .single();
       _name.text = row['full_name'] as String? ?? '';
-      _role = row['role'] as String? ?? 'pharmacist';
+      _role = (row['role'] as String? ?? 'pharmacist').trim().toLowerCase();
       _active = row['is_active'] as bool? ?? true;
       _username = row['username'] as String?;
       _teamId = row['team_id'] as String?;
-      final teams = row['teams'];
-      if (teams is Map<String, dynamic>) {
-        _teamName = teams['name'] as String?;
-      }
       setState(() => _initialLoad = false);
       await _loadAuthEmail();
     } catch (e) {
@@ -170,13 +208,16 @@ class _EditStaffPageState extends ConsumerState<EditStaffPage> {
     if (_formKey.currentState?.validate() != true) return;
     setState(() => _busy = true);
     try {
+      final update = <String, dynamic>{
+        'full_name': _name.text.trim(),
+        'is_active': _active,
+      };
+      if (!_roleLockedOwner) {
+        update['role'] = _role;
+      }
       await Supabase.instance.client
           .from('profiles')
-          .update({
-            'full_name': _name.text.trim(),
-            'role': _role,
-            'is_active': _active,
-          })
+          .update(update)
           .eq('id', widget.staffId);
       if (!mounted) return;
       AppFeedback.success(context, 'Staff profile updated');
@@ -190,62 +231,12 @@ class _EditStaffPageState extends ConsumerState<EditStaffPage> {
   }
 
   Future<void> _resetPassword() async {
-    final customCtl = TextEditingController();
-    var obscureCustom = true;
-    final proceed = await showDialog<bool>(
+    final customRaw = await showDialog<String?>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Reset password'),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Leave blank to auto-generate a strong password.',
-                  style: TextStyle(fontSize: 13),
-                ),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: customCtl,
-                  obscureText: obscureCustom,
-                  decoration: InputDecoration(
-                    labelText: 'Custom password (optional)',
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        obscureCustom
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
-                      ),
-                      onPressed: () {
-                        setDialogState(() => obscureCustom = !obscureCustom);
-                      },
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Apply'),
-            ),
-          ],
-        ),
-      ),
+      builder: (ctx) => const _EditStaffResetPasswordDialog(),
     );
-    if (proceed != true) {
-      customCtl.dispose();
-      return;
-    }
-    final custom = customCtl.text.trim();
-    customCtl.dispose();
+    if (!mounted || customRaw == null) return;
+    final custom = customRaw.trim();
     final useCustomPassword = custom.isNotEmpty;
     if (useCustomPassword && custom.length < 8) {
       if (mounted) {
@@ -390,27 +381,21 @@ class _EditStaffPageState extends ConsumerState<EditStaffPage> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
+                key: ValueKey<String>('staff_role_${widget.staffId}_$_role'),
                 initialValue: _role,
-                decoration: const InputDecoration(labelText: 'Role'),
-                items: [
-                  if (_viewerRole == 'owner' || _role == 'admin')
-                    const DropdownMenuItem(value: 'admin', child: Text('Admin')),
-                  const DropdownMenuItem(
-                    value: 'pharmacist',
-                    child: Text('Pharmacist'),
-                  ),
-                  const DropdownMenuItem(
-                    value: 'cashier',
-                    child: Text('Cashier'),
-                  ),
-                  const DropdownMenuItem(
-                    value: 'seller',
-                    child: Text('Seller'),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value != null) setState(() => _role = value);
-                },
+                decoration: InputDecoration(
+                  labelText: 'Role',
+                  enabled: !_roleLockedOwner,
+                  helperText: _roleLockedOwner
+                      ? 'Team owner role cannot be changed.'
+                      : null,
+                ),
+                items: _roleDropdownItems(),
+                onChanged: _roleLockedOwner
+                    ? null
+                    : (value) {
+                        if (value != null) setState(() => _role = value);
+                      },
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -452,6 +437,71 @@ class _EditStaffPageState extends ConsumerState<EditStaffPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _EditStaffResetPasswordDialog extends StatefulWidget {
+  const _EditStaffResetPasswordDialog();
+
+  @override
+  State<_EditStaffResetPasswordDialog> createState() =>
+      _EditStaffResetPasswordDialogState();
+}
+
+class _EditStaffResetPasswordDialogState
+    extends State<_EditStaffResetPasswordDialog> {
+  final _controller = TextEditingController();
+  bool _obscure = true;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Reset password'),
+      content: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Leave blank to auto-generate a strong password.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: _controller,
+              obscureText: _obscure,
+              decoration: InputDecoration(
+                labelText: 'Custom password (optional)',
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscure
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                  onPressed: () => setState(() => _obscure = !_obscure),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: const Text('Apply'),
+        ),
+      ],
     );
   }
 }

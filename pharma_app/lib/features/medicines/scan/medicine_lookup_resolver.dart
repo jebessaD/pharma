@@ -49,7 +49,7 @@ class MedicineLookupResolver {
     final barcodeRows = await client
         .from('medicines')
         .select(
-          'id,name,generic_name,manual_code,barcode,selling_price,is_active',
+          'id,name,generic_name,manual_code,barcode,purchase_price,selling_price,is_active',
         )
         .eq('team_id', teamId)
         .eq('branch_id', branchId)
@@ -75,7 +75,7 @@ class MedicineLookupResolver {
     final manualRows = await client
         .from('medicines')
         .select(
-          'id,name,generic_name,manual_code,barcode,selling_price,is_active',
+          'id,name,generic_name,manual_code,barcode,purchase_price,selling_price,is_active',
         )
         .eq('team_id', teamId)
         .eq('branch_id', branchId)
@@ -102,7 +102,7 @@ class MedicineLookupResolver {
     final fuzzyRows = await client
         .from('medicines')
         .select(
-          'id,name,generic_name,manual_code,barcode,selling_price,is_active',
+          'id,name,generic_name,manual_code,barcode,purchase_price,selling_price,is_active',
         )
         .eq('team_id', teamId)
         .eq('branch_id', branchId)

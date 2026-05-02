@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../pos_sale_expiry.dart';
+
 /// Cached POS read model (medicines + branch stock) for offline search and line add.
 class PosCatalogSnapshot {
   PosCatalogSnapshot({
@@ -31,6 +33,20 @@ class PosCatalogSnapshot {
     return m;
   }
 
+  /// Stock quantity by medicine counting only batches that are not past expiry (local calendar day).
+  Map<String, num> qtyByMedicineIdSalableBatches() {
+    final m = <String, num>{};
+    for (final r in stockLines) {
+      final mb = r['medicine_batches'] as Map<String, dynamic>?;
+      final mid = mb?['medicine_id'] as String?;
+      if (mid == null) continue;
+      if (batchExpiryIsBeforeToday(mb?['expiry_date'])) continue;
+      final q = (r['qty_base_unit'] as num?) ?? 0;
+      m[mid] = (m[mid] ?? 0) + q;
+    }
+    return m;
+  }
+
   List<Map<String, dynamic>> batchesWithQtyForMedicine(String medicineId) {
     final out = <Map<String, dynamic>>[];
     for (final r in stockLines) {
@@ -41,10 +57,12 @@ class PosCatalogSnapshot {
       if (bid == null) continue;
       final q = (r['qty_base_unit'] as num?) ?? 0;
       if (q <= 0) continue;
+      if (batchExpiryIsBeforeToday(mb['expiry_date'])) continue;
       out.add({
         'id': bid,
         'batch_no': mb['batch_no'],
         'expiry_date': mb['expiry_date'],
+        'sell_price_base': mb['sell_price_base'],
         'qty_on_hand': q,
       });
     }

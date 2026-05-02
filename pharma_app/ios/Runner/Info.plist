@@ -5,7 +5,7 @@
 		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>
-		<string>Pharma App</string>
+		<string>Pharma Shelf</string>
 		<key>CFBundleExecutable</key>
 		<string>$(EXECUTABLE_NAME)</string>
 		<key>CFBundleIdentifier</key>
@@ -53,7 +53,7 @@
 				<key>CFBundleTypeRole</key>
 				<string>Editor</string>
 				<key>CFBundleURLName</key>
-				<string>com.pharma.app.auth</string>
+				<string>com.pharmashelf.app.auth</string>
 				<key>CFBundleURLSchemes</key>
 				<array>
 					<string>pharmaapp</string>

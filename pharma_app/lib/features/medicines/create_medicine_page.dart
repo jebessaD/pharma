@@ -27,8 +27,6 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
   final _generic = TextEditingController();
   final _code = TextEditingController();
   final _barcode = TextEditingController();
-  final _purchase = TextEditingController(text: '0');
-  final _selling = TextEditingController(text: '0');
   final _reorder = TextEditingController(text: '0');
   String? _categoryId;
   bool _loading = false;
@@ -60,8 +58,6 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
     _generic.dispose();
     _code.dispose();
     _barcode.dispose();
-    _purchase.dispose();
-    _selling.dispose();
     _reorder.dispose();
     super.dispose();
   }
@@ -92,8 +88,8 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
         'manual_code': code,
         'barcode': _barcode.text.trim().isEmpty ? null : _barcode.text.trim(),
         'category_id': _categoryId,
-        'purchase_price': num.tryParse(_purchase.text) ?? 0,
-        'selling_price': num.tryParse(_selling.text) ?? 0,
+        'purchase_price': 0,
+        'selling_price': 0,
         'reorder_level': num.tryParse(_reorder.text) ?? 0,
       });
       if (mounted) {
@@ -170,28 +166,6 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
             ),
             const SizedBox(height: 12),
             AppTextFormField(
-              controller: _purchase,
-              label: 'Purchase price',
-              keyboardType: TextInputType.number,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-              ],
-              validator: (v) =>
-                  FormValidators.nonNegativeNumber(v, label: 'Purchase price'),
-            ),
-            const SizedBox(height: 12),
-            AppTextFormField(
-              controller: _selling,
-              label: 'Selling price',
-              keyboardType: TextInputType.number,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-              ],
-              validator: (v) =>
-                  FormValidators.nonNegativeNumber(v, label: 'Selling price'),
-            ),
-            const SizedBox(height: 12),
-            AppTextFormField(
               controller: _reorder,
               label: 'Reorder level',
               keyboardType: TextInputType.number,
@@ -200,6 +174,15 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
               ],
               validator: (v) =>
                   FormValidators.nonNegativeNumber(v, label: 'Reorder level'),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Low-stock threshold in your base unit. At or below this quantity, '
+              'the medicine counts as low stock in reports and alerts. Use 0 to turn off.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    height: 1.35,
+                  ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),

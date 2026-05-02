@@ -2,3 +2,6 @@
 # Public staff username sign-in must run without a user JWT.
 [functions.staff-sign-in-username]
 verify_jwt = false
+
+[functions.staff-username-available]
+verify_jwt = true

@@ -37,3 +37,8 @@ final posPendingCountProvider = FutureProvider<int>((ref) async {
   ref.read(syncStatusProvider.notifier).updatePending(count);
   return count;
 });
+
+final posFailedSalesCountProvider = FutureProvider<int>((ref) async {
+  final repo = ref.watch(posOutboxRepositoryProvider);
+  return repo.failedSalesCount();
+});

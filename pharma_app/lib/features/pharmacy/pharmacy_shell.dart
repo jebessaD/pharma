@@ -4,22 +4,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/auth/auth_persistence.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/connectivity_provider.dart';
+import '../../core/providers/post_pharmacy_sign_out.dart';
 import '../../core/router/matched_drawer_path.dart';
 import '../../core/shared_preferences_provider.dart';
-import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/providers/platform_messages_provider.dart';
 import '../../core/providers/team_shell_meta_provider.dart';
 import '../../core/providers/sync_status_provider.dart';
 import '../../core/widgets/app_error_state.dart';
 import '../../core/widgets/form_error_banner.dart';
 import '../../core/providers/branch_change_guard_provider.dart';
+import '../pos/offline/pos_offline_providers.dart';
 import '../../core/providers/branches_list_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
-import '../../core/providers/selected_branch_provider.dart';
-import '../pos/offline/pos_offline_providers.dart';
+import '../../core/providers/selected_branch_provider.dart'
+    show isBranchLocked, selectedBranchIdProvider;
 
 class _Dest {
   const _Dest({required this.path, required this.label, required this.icon});
@@ -48,7 +48,7 @@ class PharmacyShell extends ConsumerWidget {
     );
     const pos = _Dest(
       path: '/pharmacy/pos',
-      label: 'POS',
+      label: 'Sell',
       icon: Icons.point_of_sale_rounded,
     );
     if (role == 'admin' || role == 'owner') {
@@ -100,8 +100,8 @@ class PharmacyShell extends ConsumerWidget {
             icon: Icons.local_shipping_rounded,
           ),
           _Dest(
-            path: '/pharmacy/purchases/new',
-            label: 'New purchase',
+            path: '/pharmacy/purchases',
+            label: 'Purchases',
             icon: Icons.receipt_long_rounded,
           ),
         ]),
@@ -198,11 +198,17 @@ class PharmacyShell extends ConsumerWidget {
   }
 
   Future<void> _signOut(BuildContext context, WidgetRef ref) async {
+    if (!context.mounted) return;
+    final container = ProviderScope.containerOf(context, listen: false);
+    final prevTeamId = container.read(pharmacyProfileProvider).value?['team_id']
+        as String?;
+    final prefs = container.read(sharedPreferencesProvider);
     await Supabase.instance.client.auth.signOut();
-    ref.invalidate(pharmacyRedirectCacheProvider);
-    await clearLocalAuthMarker(ref.read(sharedPreferencesProvider));
-    await ref.read(posOutboxRepositoryProvider).clearAll();
-    if (context.mounted) context.go('/login');
+    schedulePharmacySignOutCleanup(
+      container: container,
+      prefs: prefs,
+      teamId: prevTeamId,
+    );
   }
 
   Future<bool> _confirmBranchSwitchIfDirty(
@@ -304,16 +310,25 @@ class PharmacyShell extends ConsumerWidget {
           }
         });
 
+        // Must call ref.listen unconditionally (same count every build).
+        // Branch-locked roles get branch from profile; skip auto-pick from list.
         ref.listen(branchesListProvider(teamId), (prev, next) {
           next.whenData((branches) {
+            final p = ref.read(pharmacyProfileProvider).asData?.value;
+            final userRole = (p?['role'] as String? ?? '').trim().toLowerCase();
+            if (isBranchLocked(userRole)) return;
             if (branches.isEmpty) return;
+            if (Supabase.instance.client.auth.currentUser == null) return;
             final selected = ref.read(selectedBranchIdProvider);
             final ok =
                 selected != null && branches.any((b) => b['id'] == selected);
             if (!ok) {
-              ref
-                  .read(selectedBranchIdProvider.notifier)
-                  .setBranch(branches.first['id'] as String);
+              final id = branches.first['id'] as String;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!context.mounted) return;
+                if (Supabase.instance.client.auth.currentUser == null) return;
+                ref.read(selectedBranchIdProvider.notifier).setBranch(id);
+              });
             }
           });
         });
@@ -341,6 +356,7 @@ class PharmacyShell extends ConsumerWidget {
             final branchesAsync = ref.watch(branchesListProvider(teamId));
             final selectedBranch = ref.watch(selectedBranchIdProvider);
             final role = profile['role'] as String? ?? '';
+            final branchLocked = isBranchLocked(role);
             final sections = _sectionsForRole(role);
             final allPaths = [
               for (final s in sections)
@@ -383,7 +399,10 @@ class PharmacyShell extends ConsumerWidget {
                     ? ''
                     : '${role[0].toUpperCase()}${role.substring(1).toLowerCase()}';
 
+                final sessionKey =
+                    '${profile['id'] as String? ?? ''}_$teamId';
                 return Scaffold(
+                  key: ValueKey<String>('pharmacy_shell_$sessionKey'),
                   drawer: Drawer(
                     width: 304,
                     shape: const RoundedRectangleBorder(
@@ -397,6 +416,7 @@ class PharmacyShell extends ConsumerWidget {
                         padding: const EdgeInsets.only(bottom: 12),
                         children: [
                           _DrawerHeader(
+                            key: ValueKey<String>('drawer_header_$sessionKey'),
                             branchTitle: branches.isEmpty ? null : branchTitle,
                             displayName: shellTitle,
                             roleLabel: roleLabel.isEmpty ? null : roleLabel,
@@ -514,6 +534,19 @@ class PharmacyShell extends ConsumerWidget {
                                       ),
                                     ),
                                   )
+                                else if (branchLocked)
+                                  Padding(
+                                    padding: const EdgeInsetsDirectional.only(
+                                      end: 8,
+                                    ),
+                                    child: Text(
+                                      branchTitle,
+                                      style: t.textTheme.bodyMedium?.copyWith(
+                                        color: cs.onSurfaceVariant,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  )
                                 else
                                   Align(
                                     alignment: AlignmentDirectional.centerEnd,
@@ -523,6 +556,9 @@ class PharmacyShell extends ConsumerWidget {
                                       ),
                                       child: DropdownButtonHideUnderline(
                                         child: DropdownButton<String>(
+                                          key: ValueKey<String>(
+                                            'branch_dd_$teamId',
+                                          ),
                                           isExpanded: true,
                                           isDense: true,
                                           borderRadius: BorderRadius.circular(
@@ -687,6 +723,7 @@ final _drawerUnreadAlertsCountProvider = FutureProvider.family
 
 class _DrawerHeader extends ConsumerWidget {
   const _DrawerHeader({
+    super.key,
     this.displayName,
     this.roleLabel,
     this.branchTitle,

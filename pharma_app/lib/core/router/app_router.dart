@@ -31,6 +31,7 @@ import '../../features/pos/pos_page.dart';
 import '../../features/pos/sale_receipt_page.dart';
 import '../../features/purchases/create_purchase_page.dart';
 import '../../features/purchases/edit_supplier_page.dart';
+import '../../features/purchases/purchases_hub_page.dart';
 import '../../features/purchases/supplier_list_page.dart';
 import '../../features/reports/report_viewer_page.dart';
 import '../../features/reports/reports_home_page.dart';
@@ -195,6 +196,21 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           }
           if (gate.role != null && !isAllowedForRole(gate.role!, loc)) {
             return '/pharmacy/home';
+          }
+          if (gate.role == 'pharmacist') {
+            const pharmacistBlockedReportPaths = <String>[
+              '/pharmacy/reports/profit_summary',
+              '/pharmacy/reports/sales_trend',
+              '/pharmacy/reports/sales_trend_daily',
+              '/pharmacy/reports/sales_trend_monthly',
+              '/pharmacy/reports/sales_trend_yearly',
+              '/pharmacy/reports/sales_by_staff',
+            ];
+            if (pharmacistBlockedReportPaths.any(
+              (p) => loc == p || loc.startsWith('$p?'),
+            )) {
+              return '/pharmacy/reports';
+            }
           }
         } catch (e) {
           if (!isOnline || isConnectivityRelated(e)) return null;
@@ -526,8 +542,32 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                 ],
               ),
               GoRoute(
-                path: 'purchases/new',
-                builder: (context, state) => const CreatePurchasePage(),
+                path: 'purchases',
+                builder: (context, state) {
+                  final tab = state.uri.queryParameters['tab'];
+                  final initial = tab == 'new'
+                      ? PurchasesHubTab.newPurchase
+                      : PurchasesHubTab.drafts;
+                  return PurchasesHubPage(initialTab: initial);
+                },
+                routes: [
+                  GoRoute(
+                    path: 'drafts',
+                    redirect: (context, state) => '/pharmacy/purchases',
+                  ),
+                  GoRoute(
+                    path: 'new',
+                    redirect: (context, state) =>
+                        '/pharmacy/purchases?tab=new',
+                  ),
+                  GoRoute(
+                    path: ':purchaseId',
+                    builder: (context, state) {
+                      final id = state.pathParameters['purchaseId']!;
+                      return CreatePurchasePage(purchaseId: id);
+                    },
+                  ),
+                ],
               ),
               GoRoute(
                 path: 'dashboard',

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/utils/csv_export.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/app_error_state.dart';
@@ -187,21 +188,38 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
 
   Future<void> _exportCsv() async {
     if (_rows.isEmpty) return;
-    const header = 'created_at,action_type,entity_type,user_name,user_id';
+    final header = [
+      'created_at',
+      'action_type',
+      'entity_type',
+      'user_name',
+      'user_id',
+    ].join(',');
     final lines = _rows
         .map(
-          (r) =>
-              '${formatDdMmYyyyHm(r['created_at'])},${r['action_type'] ?? ''},${r['entity_type'] ?? ''},'
-              '${r['_actor_display'] ?? ''},${r['user_id'] ?? ''}',
+          (r) => [
+            csvEscapeField(formatDdMmYyyyHm(r['created_at'])),
+            csvEscapeField(r['action_type']),
+            csvEscapeField(r['entity_type']),
+            csvEscapeField(r['_actor_display']),
+            csvEscapeField(r['user_id']),
+          ].join(','),
         )
         .toList();
-    await Clipboard.setData(
-      ClipboardData(text: ([header, ...lines]).join('\n')),
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('CSV copied to clipboard')));
+    final text = [header, ...lines].join('\n');
+    try {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('CSV copied to clipboard')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not copy CSV to clipboard.')),
+        );
+      }
     }
   }
 

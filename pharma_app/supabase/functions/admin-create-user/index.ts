@@ -33,28 +33,8 @@ function normalizeUsername(raw: string): string {
   return raw.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
 }
 
-/** Same rules as Dart `teamMailHostLabel`. */
-function teamMailHostLabel(teamName: string, teamUuid: string): string {
-  let s = teamName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  s = s.replace(/-+/g, "-").replace(/^-|-$/g, "");
-  if (s.length === 0) s = "pharma";
-  const hex = teamUuid.replace(/-/g, "");
-  const short = hex.length >= 8 ? hex.slice(0, 8) : hex.padEnd(8, "0");
-  let host = `${s}-${short}`;
-  if (host.length > 63) {
-    host = host.slice(0, 63).replace(/-+$/g, "");
-  }
-  if (host.length === 0) host = `pharma-${short}`;
-  return host;
-}
-
-function staffLoginEmail(
-  teamName: string,
-  teamId: string,
-  username: string,
-): string {
-  const host = teamMailHostLabel(teamName, teamId);
-  return `${username}@${host}.${STAFF_EMAIL_DOMAIN}`;
+function staffLoginEmail(username: string): string {
+  return `${username}@${STAFF_EMAIL_DOMAIN}`;
 }
 
 Deno.serve(async (req: Request) => {
@@ -153,24 +133,11 @@ Deno.serve(async (req: Request) => {
     }
     username = normalized;
 
-    const { data: teamRow, error: teamErr } = await adminClient
-      .from("teams")
-      .select("name")
-      .eq("id", teamId)
-      .maybeSingle();
-    if (teamErr != null) {
-      return new Response(teamErr.message, {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "text/plain" },
-      });
-    }
-    const teamName = (teamRow?.name as string | undefined) ?? "";
-    email = staffLoginEmail(teamName, teamId, normalized);
+    email = staffLoginEmail(normalized);
 
-    const { data: dup, error: dupErr } = await callerClient
+    const { data: dup, error: dupErr } = await adminClient
       .from("profiles")
       .select("id")
-      .eq("team_id", teamId)
       .eq("username", normalized)
       .maybeSingle();
     if (dupErr != null) {

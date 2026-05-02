@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/providers/pharmacy_redirect_cache_provider.dart';
+import '../../core/providers/pharmacy_profile_provider.dart';
+import '../../core/providers/post_pharmacy_sign_out.dart';
+import '../../core/shared_preferences_provider.dart';
 import '../../core/widgets/pharmacy_page_app_bar.dart';
 
 /// Shown when the team’s self-serve trial window has ended.
@@ -35,7 +36,7 @@ class TrialEndedPage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Contact support or your account owner to continue using Pharma on this team.',
+                  'Contact support or your account owner to continue using Pharma Shelf on this team.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         height: 1.35,
@@ -45,9 +46,20 @@ class TrialEndedPage extends ConsumerWidget {
                 const SizedBox(height: 28),
                 FilledButton(
                   onPressed: () async {
+                    if (!context.mounted) return;
+                    final container =
+                        ProviderScope.containerOf(context, listen: false);
+                    final prevTeam = container
+                            .read(pharmacyProfileProvider)
+                            .value?['team_id']
+                        as String?;
+                    final prefs = container.read(sharedPreferencesProvider);
                     await Supabase.instance.client.auth.signOut();
-                    ref.invalidate(pharmacyRedirectCacheProvider);
-                    if (context.mounted) context.go('/login');
+                    schedulePharmacySignOutCleanup(
+                      container: container,
+                      prefs: prefs,
+                      teamId: prevTeam,
+                    );
                   },
                   child: const Text('Sign out'),
                 ),

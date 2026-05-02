@@ -34,6 +34,44 @@ class _SupplierListPageState extends ConsumerState<SupplierListPage> {
     if (mounted) _load();
   }
 
+  Future<void> _deleteSupplier(Map<String, dynamic> s) async {
+    final id = s['id'] as String? ?? '';
+    final name = s['name'] as String? ?? 'Supplier';
+    if (id.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete supplier?'),
+        content: Text(
+          'Remove “$name” from your team? This cannot be undone. '
+          'Existing purchases stay in history; their supplier link will be cleared.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await Supabase.instance.client.from('suppliers').delete().eq('id', id);
+      await _load();
+      if (mounted) AppFeedback.success(context, 'Supplier deleted');
+    } catch (e) {
+      if (mounted) AppFeedback.error(context, mapFormError(e));
+    }
+  }
+
   Future<void> _load() async {
     final profile = await ref.read(pharmacyProfileProvider.future);
     final teamId = profile?['team_id'] as String?;
@@ -74,32 +112,61 @@ class _SupplierListPageState extends ConsumerState<SupplierListPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) {
+        final screenW = MediaQuery.sizeOf(ctx).width;
+        final dialogWidth = (screenW - 48).clamp(420.0, 720.0);
         return StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
-            title: const Text('New supplier'),
-            content: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: name,
-                    decoration: const InputDecoration(labelText: 'Name'),
-                    validator: (v) => FormValidators.requiredText(v, label: 'Name'),
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+            title: Row(
+              children: [
+                const Expanded(child: Text('New supplier')),
+                IconButton(
+                  tooltip: 'Clear fields',
+                  icon: const Icon(Icons.delete_outline_rounded),
+                  onPressed: () {
+                    name.clear();
+                    phone.clear();
+                    setDialogState(() => formError = '');
+                  },
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: dialogWidth,
+              child: SingleChildScrollView(
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextFormField(
+                        controller: name,
+                        decoration: const InputDecoration(labelText: 'Name'),
+                        validator: (v) =>
+                            FormValidators.requiredText(v, label: 'Name'),
+                      ),
+                      const SizedBox(height: 28),
+                      TextFormField(
+                        controller: phone,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(labelText: 'Phone'),
+                      ),
+                      if (formError.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        FormErrorBanner(message: formError),
+                      ],
+                    ],
                   ),
-                  TextFormField(
-                    controller: phone,
-                    decoration: const InputDecoration(labelText: 'Phone'),
-                  ),
-                  if (formError.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    FormErrorBanner(message: formError),
-                  ],
-                ],
+                ),
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
               FilledButton(
                 onPressed: () {
                   if (formKey.currentState?.validate() != true) return;
@@ -116,7 +183,11 @@ class _SupplierListPageState extends ConsumerState<SupplierListPage> {
         );
       },
     );
-    if (ok != true) return;
+    if (ok != true) {
+      name.dispose();
+      phone.dispose();
+      return;
+    }
     try {
       await Supabase.instance.client.from('suppliers').insert({
         'team_id': teamId,
@@ -184,10 +255,29 @@ class _SupplierListPageState extends ConsumerState<SupplierListPage> {
                                     return ListTile(
                                       title: Text(s['name'] as String? ?? ''),
                                       subtitle: Text(s['phone'] as String? ?? ''),
-                                      trailing: IconButton(
-                                        tooltip: 'Edit',
-                                        onPressed: () => _openSupplierEdit(id),
-                                        icon: const Icon(Icons.edit_outlined),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            tooltip: 'Delete',
+                                            onPressed: () =>
+                                                _deleteSupplier(s),
+                                            icon: Icon(
+                                              Icons.delete_outline_rounded,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .error,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Edit',
+                                            onPressed: () =>
+                                                _openSupplierEdit(id),
+                                            icon: const Icon(
+                                              Icons.edit_outlined,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                       onTap: () => _openSupplierEdit(id),
                                     );

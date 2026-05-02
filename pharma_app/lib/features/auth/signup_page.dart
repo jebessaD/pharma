@@ -226,7 +226,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
                         ),
                         const SizedBox(height: 10),
                         Text(
-                          'Pharma Stocks',
+                          'Pharma Shelf',
                           textAlign: TextAlign.center,
                           style: t.textTheme.headlineSmall?.copyWith(
                             fontWeight: FontWeight.w700,

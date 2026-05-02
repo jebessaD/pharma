@@ -7,9 +7,6 @@ const pendingOwnerSignupEmailKey = 'pending_owner_signup_email';
 const pendingOwnerSignupTeamNameKey = 'pending_owner_signup_team_name';
 const pendingOwnerSignupFullNameKey = 'pending_owner_signup_full_name';
 
-/// Last successful pharmacy `team_id`; optional hint for staff username sign-in when usernames collide across teams.
-const lastTeamIdForStaffSignInKey = 'last_team_id_for_staff_sign_in';
-
 Future<void> persistLocalAuthMarker(SharedPreferences prefs, User user) async {
   await prefs.setString(lastAuthenticatedUserIdKey, user.id);
   await prefs.setString(
@@ -21,17 +18,6 @@ Future<void> persistLocalAuthMarker(SharedPreferences prefs, User user) async {
 Future<void> clearLocalAuthMarker(SharedPreferences prefs) async {
   await prefs.remove(lastAuthenticatedUserIdKey);
   await prefs.remove(lastLoginAtKey);
-}
-
-Future<void> persistLastTeamIdForStaffSignIn(
-  SharedPreferences prefs,
-  String teamId,
-) async {
-  await prefs.setString(lastTeamIdForStaffSignInKey, teamId);
-}
-
-Future<void> clearLastTeamIdForStaffSignIn(SharedPreferences prefs) async {
-  await prefs.remove(lastTeamIdForStaffSignInKey);
 }
 
 Future<void> persistPendingOwnerSignup(

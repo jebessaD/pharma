@@ -1,13 +1,16 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/utils/csv_export.dart';
 import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/app_error_state.dart';
 import '../../core/widgets/pharmacy_hub_scaffold.dart';
@@ -149,14 +152,41 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
       final mb = r['medicine_batches'] as Map<String, dynamic>?;
       final med = mb?['medicines'] as Map<String, dynamic>?;
       lines.add(
-        '${med?['name'] ?? ''},${mb?['batch_no'] ?? ''},${mb?['expiry_date'] ?? ''},${r['qty_base_unit'] ?? 0}',
+        [
+          csvEscapeField(med?['name']),
+          csvEscapeField(mb?['batch_no']),
+          csvEscapeField(mb?['expiry_date']),
+          csvEscapeField(r['qty_base_unit']),
+        ].join(','),
       );
     }
-    await Clipboard.setData(ClipboardData(text: lines.join('\n')));
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('CSV copied to clipboard')));
+    final text = lines.join('\n');
+    try {
+      if (kIsWeb) {
+        await Clipboard.setData(ClipboardData(text: text));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('CSV copied to clipboard')),
+          );
+        }
+        return;
+      }
+      await Share.share(text, subject: 'pharma_stock_export.csv');
+    } catch (_) {
+      try {
+        await Clipboard.setData(ClipboardData(text: text));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('CSV copied to clipboard')),
+          );
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not export CSV.')),
+          );
+        }
+      }
     }
   }
 
@@ -430,8 +460,8 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                     value: 'csv',
                     child: ListTile(
                       dense: true,
-                      leading: Icon(Icons.download_outlined),
-                      title: Text('CSV'),
+                      leading: Icon(Icons.ios_share_outlined),
+                      title: Text(kIsWeb ? 'Copy CSV' : 'Export CSV'),
                     ),
                   ),
                 ],

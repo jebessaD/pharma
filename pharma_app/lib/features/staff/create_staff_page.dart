@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/auth/staff_username_availability.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
 import '../../core/providers/branches_list_provider.dart';
@@ -29,9 +32,26 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
   bool _loading = false;
   bool _obscurePassword = true;
   String? _error;
+  Timer? _usernameDebounce;
+  int _usernameCheckSeq = 0;
+  bool? _usernameAvailable;
+
+  void _scheduleUsernameAvailabilityCheck(String _) {
+    _usernameDebounce?.cancel();
+    _usernameDebounce = Timer(const Duration(milliseconds: 400), () async {
+      final seq = ++_usernameCheckSeq;
+      final avail = await queryStaffUsernameAvailable(
+        Supabase.instance.client,
+        _username.text,
+      );
+      if (!mounted || seq != _usernameCheckSeq) return;
+      setState(() => _usernameAvailable = avail);
+    });
+  }
 
   @override
   void dispose() {
+    _usernameDebounce?.cancel();
     _username.dispose();
     _password.dispose();
     _fullName.dispose();
@@ -41,6 +61,11 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
   Future<void> _create() async {
     debugPrint('[CreateStaff] submit tapped');
     if (_formKey.currentState?.validate() != true) return;
+    if (_usernameAvailable == false) return;
+    if (_branchId == null) {
+      setState(() => _error = 'Please assign a branch.');
+      return;
+    }
     final profile = ref.read(pharmacyProfileProvider).value;
     if (profile == null) {
       debugPrint('[CreateStaff] profile is null');
@@ -79,11 +104,6 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
       }
       debugPrint('[CreateStaff] function invoke success status=${res.status}');
       if (!mounted) return;
-      String? loginEmail;
-      final data = res.data;
-      if (data is Map) {
-        loginEmail = data['login_email'] as String?;
-      }
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -94,8 +114,7 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'Share these details with this person. They can sign in with their username '
-                  'or the full email below.',
+                  'Share these details with this person. They sign in with username and password.',
                   style: TextStyle(fontSize: 13),
                 ),
                 const SizedBox(height: 12),
@@ -104,12 +123,6 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
                   style: TextStyle(fontWeight: FontWeight.w600),
                 ),
                 SelectableText(username),
-                const SizedBox(height: 8),
-                const Text(
-                  'Sign-in email',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                SelectableText(loginEmail ?? '—'),
                 const SizedBox(height: 8),
                 const Text(
                   'Password',
@@ -123,13 +136,13 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
             TextButton(
               onPressed: () {
                 Clipboard.setData(
-                  ClipboardData(text: '${loginEmail ?? ''}\n$password'),
+                  ClipboardData(text: '$username\n$password'),
                 );
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Copied email and password')),
+                  const SnackBar(content: Text('Copied username and password')),
                 );
               },
-              child: const Text('Copy email & password'),
+              child: const Text('Copy username & password'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx),
@@ -156,6 +169,11 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
     final canAssignAdmin = viewerRole == 'owner';
     final teamId = profile?['team_id'] as String? ?? '';
     final branches = ref.watch(branchesListProvider(teamId)).value ?? const [];
+    if (_branchId == null && branches.length == 1) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _branchId = branches.first['id'] as String);
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Add staff')),
@@ -175,10 +193,19 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
               controller: _username,
               label: 'Username',
               textCapitalization: TextCapitalization.none,
-              validator: FormValidators.staffUsername,
+              onChanged: _scheduleUsernameAvailabilityCheck,
+              validator: (v) {
+                final base = FormValidators.staffUsername(v);
+                if (base != null) return base;
+                if (_usernameAvailable == false) {
+                  return 'This username is already taken';
+                }
+                return null;
+              },
             ),
             const Text(
-              'Lowercase letters, numbers, and underscores only (3–32 characters).',
+              'Lowercase letters, numbers, and underscores only (3–32 characters). '
+              'Must be unique across all pharmacies.',
               style: TextStyle(fontSize: 12),
             ),
             const SizedBox(height: 12),
@@ -218,12 +245,8 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
                       child: Text('Pharmacist'),
                     ),
                     const DropdownMenuItem(
-                      value: 'cashier',
-                      child: Text('Cashier'),
-                    ),
-                    const DropdownMenuItem(
                       value: 'seller',
-                      child: Text('Seller'),
+                      child: Text('Seller (counter)'),
                     ),
                   ],
                   onChanged: (value) {
@@ -236,24 +259,31 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
             ),
             const SizedBox(height: 12),
             InputDecorator(
-              decoration: const InputDecoration(labelText: 'Branch (optional)'),
+              decoration: InputDecoration(
+                labelText: 'Branch *',
+                errorText: _branchId == null && _error != null && _error!.contains('branch')
+                    ? 'Required'
+                    : null,
+              ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String?>(
                   value: _branchId,
                   isExpanded: true,
-                  items: [
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('No branch'),
-                    ),
-                    ...branches.map(
-                      (b) => DropdownMenuItem<String?>(
-                        value: b['id'] as String,
-                        child: Text(b['name'] as String? ?? ''),
-                      ),
-                    ),
-                  ],
-                  onChanged: (value) => setState(() => _branchId = value),
+                  hint: const Text('Select a branch'),
+                  items: branches
+                      .map(
+                        (b) => DropdownMenuItem<String?>(
+                          value: b['id'] as String,
+                          child: Text(b['name'] as String? ?? ''),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) => setState(() {
+                    _branchId = value;
+                    if (_error != null && _error!.contains('branch')) {
+                      _error = null;
+                    }
+                  }),
                 ),
               ),
             ),

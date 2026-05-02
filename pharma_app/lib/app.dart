@@ -13,7 +13,7 @@ class PharmaApp extends ConsumerWidget {
     ref.watch(posSyncServiceProvider);
     final router = ref.watch(goRouterProvider);
     return MaterialApp.router(
-      title: 'Pharma',
+      title: 'Pharma Shelf',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       routerConfig: router,

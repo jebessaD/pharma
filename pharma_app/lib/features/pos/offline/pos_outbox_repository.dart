@@ -38,16 +38,26 @@ class PosOutboxRepository {
 
   Future<List<OfflineSaleDto>> getAll() => _readAll();
 
+  /// Sales waiting for upload. Terminal [failed] rows are excluded so sync does not retry forever.
   Future<List<OfflineSaleDto>> getPending() async {
     final list = await _readAll();
     return list
-        .where(
-          (e) =>
-              e.status == OfflineSaleSyncStatus.pending ||
-              e.status == OfflineSaleSyncStatus.failed,
-        )
+        .where((e) => e.status == OfflineSaleSyncStatus.pending)
         .toList()
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  }
+
+  Future<int> failedSalesCount() async {
+    final list = await _readAll();
+    return list
+        .where((e) => e.status == OfflineSaleSyncStatus.failed)
+        .length;
+  }
+
+  Future<void> clearFailedSales() async {
+    final list = await _readAll();
+    list.removeWhere((e) => e.status == OfflineSaleSyncStatus.failed);
+    await _writeAll(list);
   }
 
   Future<void> update(OfflineSaleDto sale) async {
@@ -70,9 +80,16 @@ class PosOutboxRepository {
     await _prefs.remove(_storageKey);
   }
 
+  /// Pending + failed rows (anything that still needs user attention in the queue UI).
   Future<int> pendingCount() async {
-    final p = await getPending();
-    return p.length;
+    final list = await _readAll();
+    return list
+        .where(
+          (e) =>
+              e.status == OfflineSaleSyncStatus.pending ||
+              e.status == OfflineSaleSyncStatus.failed,
+        )
+        .length;
   }
 
   Future<List<OfflineSaleDto>> _readAll() async {

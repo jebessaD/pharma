@@ -18,21 +18,23 @@ import '../medicines/scan/medicine_scan_controller.dart';
 import '../medicines/scan/scan_entry_widget.dart';
 import 'offline/pos_catalog_cache_repository.dart';
 import 'offline/pos_offline_providers.dart';
+import 'pos_sale_expiry.dart';
 
 class _PosCartLine {
   _PosCartLine({
     required this.medicineId,
     required this.medicineName,
     required this.manualCode,
-    required this.listPricePerBase,
+    required num listPricePerBase,
     required this.batchesWithQty,
     required this.qtyBase,
-  }) : selectedBatchId = batchesWithQty.first['id'] as String;
+  })  : _medicineSellPrice = listPricePerBase,
+        selectedBatchId = batchesWithQty.first['id'] as String;
 
   final String medicineId;
   final String medicineName;
   final String manualCode;
-  final num listPricePerBase;
+  final num _medicineSellPrice;
   final List<Map<String, dynamic>> batchesWithQty;
 
   String selectedBatchId;
@@ -41,6 +43,18 @@ class _PosCartLine {
   String? overrideReason;
   final TextEditingController priceController = TextEditingController();
   final TextEditingController reasonController = TextEditingController();
+
+  /// Sell price from the currently selected batch, falling back to medicine default.
+  num get listPricePerBase {
+    for (final b in batchesWithQty) {
+      if (b['id'] == selectedBatchId) {
+        final sp = b['sell_price_base'];
+        if (sp is num && sp > 0) return sp;
+        break;
+      }
+    }
+    return _medicineSellPrice;
+  }
 
   void initControllers() {
     priceController.text = listPricePerBase.toStringAsFixed(2);
@@ -84,6 +98,7 @@ class _PosPageState extends ConsumerState<PosPage> {
   final _discountCtl = TextEditingController();
   String? _activeBranchId;
   Timer? _searchDebounce;
+  final LayerLink _posSearchLayerLink = LayerLink();
 
   Future<void> _refreshSearchMatches() async {
     final raw = _searchCtl.text.trim();
@@ -117,11 +132,21 @@ class _PosPageState extends ConsumerState<PosPage> {
           return s.contains(q);
         }).toList();
         final ranked = rankMedicines(broad, raw);
-        final qtyByMed = snap.qtyByMedicineId();
-        list = ranked
-            .where((m) => ((qtyByMed[m['id'] as String] ?? 0) > 0))
-            .take(10)
-            .toList();
+        final qtySalable = snap.qtyByMedicineIdSalableBatches();
+        final qtyAll = snap.qtyByMedicineId();
+        final enriched = <Map<String, dynamic>>[];
+        for (final m in ranked) {
+          final mid = m['id'] as String;
+          if ((qtySalable[mid] ?? 0) > 0) {
+            enriched.add(Map<String, dynamic>.from(m));
+          } else if ((qtyAll[mid] ?? 0) > 0) {
+            enriched.add({
+              ...Map<String, dynamic>.from(m),
+              kPosExpiredStockOnlyKey: true,
+            });
+          }
+        }
+        list = enriched.take(10).toList();
       } else {
         if (branchId == null) {
           if (!mounted || _searchCtl.text.trim() != raw) return;
@@ -142,22 +167,38 @@ class _PosPageState extends ConsumerState<PosPage> {
         if (list.isNotEmpty) {
           final bal = await Supabase.instance.client
               .from('stock_balances')
-              .select('qty_base_unit, medicine_batches(medicine_id)')
+              .select(
+                'qty_base_unit, medicine_batches(medicine_id, expiry_date)',
+              )
               .eq('team_id', teamId)
               .eq('branch_id', branchId);
           if (!mounted || _searchCtl.text.trim() != raw) return;
-          final qtyByMed = <String, num>{};
+          final qtySalable = <String, num>{};
+          final qtyExpired = <String, num>{};
           for (final r in List<Map<String, dynamic>>.from(bal as List)) {
             final mb = r['medicine_batches'] as Map<String, dynamic>?;
             final mid = mb?['medicine_id'] as String?;
             if (mid == null) continue;
             final qq = (r['qty_base_unit'] as num?) ?? 0;
-            qtyByMed[mid] = (qtyByMed[mid] ?? 0) + qq;
+            if (batchExpiryIsBeforeToday(mb?['expiry_date'])) {
+              qtyExpired[mid] = (qtyExpired[mid] ?? 0) + qq;
+            } else {
+              qtySalable[mid] = (qtySalable[mid] ?? 0) + qq;
+            }
           }
-          final inStock = list
-              .where((m) => ((qtyByMed[m['id'] as String] ?? 0) > 0))
-              .toList();
-          list = rankMedicines(inStock, raw).take(10).toList();
+          final enriched = <Map<String, dynamic>>[];
+          for (final m in list) {
+            final mid = m['id'] as String;
+            if ((qtySalable[mid] ?? 0) > 0) {
+              enriched.add(Map<String, dynamic>.from(m));
+            } else if ((qtyExpired[mid] ?? 0) > 0) {
+              enriched.add({
+                ...Map<String, dynamic>.from(m),
+                kPosExpiredStockOnlyKey: true,
+              });
+            }
+          }
+          list = rankMedicines(enriched, raw).take(10).toList();
         } else {
           list = list.take(10).toList();
         }
@@ -213,7 +254,7 @@ class _PosPageState extends ConsumerState<PosPage> {
       final stock = await Supabase.instance.client
           .from('stock_balances')
           .select(
-            'medicine_batch_id, qty_base_unit, medicine_batches(id, medicine_id, batch_no, expiry_date)',
+            'medicine_batch_id, qty_base_unit, medicine_batches(id, medicine_id, batch_no, expiry_date, sell_price_base)',
           )
           .eq('team_id', teamId)
           .eq('branch_id', branchId);
@@ -270,6 +311,48 @@ class _PosPageState extends ConsumerState<PosPage> {
     _branchChangeGuard.setDirty(_guardKey, dirty);
   }
 
+  void _invalidatePosOutboxCounts() {
+    ref.invalidate(posPendingCountProvider);
+    ref.invalidate(posFailedSalesCountProvider);
+  }
+
+  Map<String, dynamic>? _selectedBatchMap(_PosCartLine line) {
+    for (final b in line.batchesWithQty) {
+      if (b['id'] == line.selectedBatchId) return b;
+    }
+    return null;
+  }
+
+  /// Prefer a non-expired batch when the current selection is invalid.
+  String _effectiveBatchIdForLine(_PosCartLine line) {
+    final salable = line.batchesWithQty
+        .where((b) => !batchExpiryIsBeforeToday(b['expiry_date']))
+        .toList();
+    final choices = salable.isNotEmpty ? salable : line.batchesWithQty;
+    final sel = _selectedBatchMap(line);
+    final selectedBad =
+        sel == null || batchExpiryIsBeforeToday(sel['expiry_date']);
+    final preferred = (selectedBad && salable.isNotEmpty)
+        ? salable.first['id'] as String
+        : choices.any((b) => b['id'] == line.selectedBatchId)
+        ? line.selectedBatchId
+        : choices.first['id'] as String;
+    if (preferred != line.selectedBatchId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {
+          line.selectedBatchId = preferred;
+          if (line.overridePrice == null) {
+            line.priceController.text =
+                line.listPricePerBase.toStringAsFixed(2);
+          }
+        });
+        _syncDirtyState();
+      });
+    }
+    return preferred;
+  }
+
   Future<void> _pickMedicine(Map<String, dynamic> medicine) async {
     final profile = ref.read(pharmacyProfileProvider).value;
     final teamId = profile?['team_id'] as String?;
@@ -301,7 +384,7 @@ class _PosPageState extends ConsumerState<PosPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'No offline catalog yet. Connect once with internet on POS, then try again.',
+              'No offline catalog yet. Connect to the internet once on this screen, then try again.',
             ),
           ),
         );
@@ -322,7 +405,7 @@ class _PosPageState extends ConsumerState<PosPage> {
           List<Map<String, dynamic>>.from(
             await Supabase.instance.client
                 .from('medicine_batches')
-                .select('id, batch_no, expiry_date')
+                .select('id, batch_no, expiry_date, sell_price_base')
                 .eq('medicine_id', mid)
                 .eq('branch_id', branchId)
                 .order('expiry_date'),
@@ -353,7 +436,8 @@ class _PosPageState extends ConsumerState<PosPage> {
       final eligible =
           batchRows.where((row) {
             final id = row['id'] as String;
-            return (balMap[id] ?? 0) > 0;
+            return (balMap[id] ?? 0) > 0 &&
+                !batchExpiryIsBeforeToday(row['expiry_date']);
           }).toList()..sort((a, b) {
             final da = a['expiry_date'] as String? ?? '';
             final db = b['expiry_date'] as String? ?? '';
@@ -362,7 +446,17 @@ class _PosPageState extends ConsumerState<PosPage> {
       if (!mounted) return;
       if (eligible.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No stock on hand for this medicine')),
+          SnackBar(
+            content: Text(
+              batchRows.any((row) {
+                    final id = row['id'] as String;
+                    return (balMap[id] ?? 0) > 0 &&
+                        batchExpiryIsBeforeToday(row['expiry_date']);
+                  })
+                  ? 'All stock for this medicine is from expired batches.'
+                  : 'No stock on hand for this medicine',
+            ),
+          ),
         );
         return;
       }
@@ -373,7 +467,18 @@ class _PosPageState extends ConsumerState<PosPage> {
           )
           .toList();
     }
+    withQty = withQty
+        .where((b) => !batchExpiryIsBeforeToday(b['expiry_date']))
+        .toList();
     if (!mounted) return;
+    if (withQty.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('All stock for this medicine is from expired batches.'),
+        ),
+      );
+      return;
+    }
 
     final line = _PosCartLine(
       medicineId: mid,
@@ -446,6 +551,10 @@ class _PosPageState extends ConsumerState<PosPage> {
       if (up < 0) {
         return 'Line ${i + 1}: enter a valid unit price (base).';
       }
+      final sel = _selectedBatchMap(line);
+      if (sel != null && batchExpiryIsBeforeToday(sel['expiry_date'])) {
+        return 'Line ${i + 1}: This batch is expired and cannot be sold. Change batch or remove the line.';
+      }
     }
     return null;
   }
@@ -502,7 +611,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                 ? _referenceNo.text.trim()
                 : null,
           );
-      ref.invalidate(posPendingCountProvider);
+      _invalidatePosOutboxCounts();
       final id = await ref
           .read(posSyncServiceProvider)
           .syncSingleQueuedSale(queued, isOnline: isOnline);
@@ -514,9 +623,15 @@ class _PosPageState extends ConsumerState<PosPage> {
       });
       _syncDirtyState();
       if (mounted) {
-        final msg = id == null
-            ? 'Saved offline. This sale will sync when internet returns.'
-            : 'Sale completed';
+        final String msg;
+        if (id != null) {
+          msg = 'Sale completed';
+        } else if (!isOnline) {
+          msg = 'Saved offline. This sale will sync when internet returns.';
+        } else {
+          msg =
+              'Sale saved on this device. The server did not confirm yet — tap Sync now or wait for automatic retry.';
+        }
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(msg)));
@@ -525,6 +640,14 @@ class _PosPageState extends ConsumerState<PosPage> {
         }
       }
     } catch (e) {
+      assert(() {
+        if (e is PostgrestException) {
+          debugPrint(
+            'POS checkout Postgrest: code=${e.code} message=${e.message}',
+          );
+        }
+        return true;
+      }());
       setState(() => _error = mapFormError(e));
     } finally {
       if (mounted) setState(() => _checkoutLoading = false);
@@ -619,6 +742,7 @@ class _PosPageState extends ConsumerState<PosPage> {
     final syncStatus = ref.watch(syncStatusProvider);
     final pendingCount =
         ref.watch(posPendingCountProvider).value ?? syncStatus.pendingCount;
+    final failedSalesCount = ref.watch(posFailedSalesCountProvider).value ?? 0;
     final teamId = profile?['team_id'] as String? ?? '';
     final branchId = ref.watch(selectedBranchIdProvider);
     final t = Theme.of(context);
@@ -673,452 +797,675 @@ class _PosPageState extends ConsumerState<PosPage> {
             },
           ),
         },
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (!isOnline || pendingCount > 0)
-                Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.cloud_sync_outlined, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            !isOnline
-                                ? 'Offline - data will sync when internet returns.'
-                                : 'Pending sync: $pendingCount',
-                            style: t.textTheme.bodySmall,
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: isOnline
-                              ? () async {
-                                  await ref
-                                      .read(posSyncServiceProvider)
-                                      .syncPending(isOnline: true);
-                                  ref.invalidate(posPendingCountProvider);
-                                }
-                              : null,
-                          child: const Text('Sync now'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              if (teamId.isEmpty)
-                const Text('Sign in required')
-              else
-                Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ScanEntryWidget(
-                            controller: _searchCtl,
-                            onScanTap: _scanAndResolve,
-                            onSubmitted: _resolveSearchText,
-                            hintText: _lines.isNotEmpty
-                                ? 'Add more medicine'
-                                : 'Search or scan medicine',
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_searchMatches.isNotEmpty)
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 240),
-                        child: Card(
-                          child: ListView.builder(
-                            itemCount: _searchMatches.length,
-                            itemBuilder: (context, i) {
-                              final m = _searchMatches[i];
-                              return ListTile(
-                                dense: true,
-                                title: Text(m['name'] as String? ?? ''),
-                                subtitle: Text(
-                                  '${m['manual_code'] ?? ''} ${m['barcode'] ?? ''}',
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final searchResultsMaxHeight = (constraints.maxHeight * 0.35).clamp(
+              120.0,
+              280.0,
+            );
+            return Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!isOnline || pendingCount > 0)
+                    Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.cloud_sync_outlined, size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    !isOnline
+                                        ? 'Offline - data will sync when internet returns.'
+                                        : 'Pending sync: $pendingCount',
+                                    style: t.textTheme.bodySmall,
+                                  ),
                                 ),
-                                onTap: () => _pickMedicine(m),
-                              );
-                            },
-                          ),
-                        ),
-                      )
-                    else if (_searchCtl.text.trim().isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          branchId == null
-                              ? 'Select a branch to search salable stock.'
-                              : 'No search results found (no in-stock matches at this branch).',
-                          style: t.textTheme.bodySmall?.copyWith(
-                            color: t.colorScheme.onSurfaceVariant,
-                          ),
+                                TextButton(
+                                  onPressed: isOnline
+                                      ? () async {
+                                          await ref
+                                              .read(posSyncServiceProvider)
+                                              .syncPending(isOnline: true);
+                                          _invalidatePosOutboxCounts();
+                                        }
+                                      : null,
+                                  child: const Text('Sync now'),
+                                ),
+                              ],
+                            ),
+                            if (failedSalesCount > 0) ...[
+                              const SizedBox(height: 4),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () async {
+                                    await ref
+                                        .read(posOutboxRepositoryProvider)
+                                        .clearFailedSales();
+                                    if (!context.mounted) return;
+                                    _invalidatePosOutboxCounts();
+                                  },
+                                  child: Text(
+                                    'Dismiss $failedSalesCount failed sale(s)',
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if ((syncStatus.lastError ?? '')
+                                .trim()
+                                .isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                syncStatus.lastError!.trim(),
+                                maxLines: 6,
+                                overflow: TextOverflow.ellipsis,
+                                style: t.textTheme.bodySmall?.copyWith(
+                                  color: t.colorScheme.error,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
-                  ],
-                ),
-              const SizedBox(height: 12),
-              Text('Quick cart', style: t.textTheme.titleMedium),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Text(
-                    _error!,
-                    style: TextStyle(color: t.colorScheme.error),
-                  ),
-                ),
-              Expanded(
-                child: _lines.isEmpty
-                    ? Center(
-                        child: Text(
-                          'Search a medicine to add a line.\nDefault batch = nearest expiry; change below.',
-                          textAlign: TextAlign.center,
-                          style: t.textTheme.bodyMedium?.copyWith(
-                            color: t.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: _lines.length,
-                        itemBuilder: (context, i) {
-                          final line = _lines[i];
-                          final qb = _qtyBaseForLine(line);
-                          final up = line.unitPrice;
-                          final lineTotal = qb != null ? qb * up : null;
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            elevation: 0,
-                            shadowColor: Colors.transparent,
-                            color: t.colorScheme.surface,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              side: BorderSide(
-                                color: i == _selectedLineIndex
-                                    ? t.colorScheme.outline.withValues(
-                                        alpha: 0.55,
-                                      )
-                                    : t.colorScheme.outlineVariant.withValues(
-                                        alpha: 0.45,
-                                      ),
+                    ),
+                  if (teamId.isEmpty)
+                    const Text('Sign in required')
+                  else
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            CompositedTransformTarget(
+                              link: _posSearchLayerLink,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: ScanEntryWidget(
+                                      controller: _searchCtl,
+                                      onScanTap: _scanAndResolve,
+                                      onSubmitted: _resolveSearchText,
+                                      hintText: _lines.isNotEmpty
+                                          ? 'Add more medicine'
+                                          : 'Search or scan medicine',
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            child: InkWell(
-                              onTap: () =>
-                                  setState(() => _selectedLineIndex = i),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                line.medicineName,
-                                                style: t.textTheme.titleSmall,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                              Text(
-                                                line.manualCode,
-                                                style: t.textTheme.labelSmall,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 90,
-                                          child: Text(
-                                            lineTotal == null
-                                                ? '-'
-                                                : lineTotal.toStringAsFixed(2),
-                                            textAlign: TextAlign.end,
-                                          ),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(
-                                            Icons.delete_outline,
-                                          ),
-                                          onPressed: () => _removeLine(i),
-                                        ),
-                                      ],
+                            if (_searchMatches.isNotEmpty)
+                              CompositedTransformFollower(
+                                link: _posSearchLayerLink,
+                                showWhenUnlinked: false,
+                                targetAnchor: Alignment.bottomLeft,
+                                followerAnchor: Alignment.topLeft,
+                                offset: const Offset(0, 4),
+                                child: Material(
+                                  elevation: 12,
+                                  color: t.colorScheme.surfaceContainerHigh,
+                                  surfaceTintColor: Colors.transparent,
+                                  shadowColor: Colors.black38,
+                                  borderRadius: BorderRadius.circular(8),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxWidth: constraints.maxWidth,
+                                      maxHeight: searchResultsMaxHeight,
                                     ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: DecoratedBox(
-                                            decoration: BoxDecoration(
-                                              color: t
-                                                  .colorScheme
-                                                  .surfaceContainerHighest,
-                                              borderRadius:
-                                                  BorderRadius.circular(2),
-                                              border: Border.all(
-                                                color: t
-                                                    .colorScheme
-                                                    .outlineVariant,
-                                              ),
-                                            ),
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 10,
+                                    child: ListView.builder(
+                                      padding: EdgeInsets.zero,
+                                      itemCount: _searchMatches.length,
+                                      itemBuilder: (context, i) {
+                                        final m = _searchMatches[i];
+                                        final expiredOnly =
+                                            m[kPosExpiredStockOnlyKey] == true;
+                                        return ListTile(
+                                          dense: true,
+                                          title: Text(
+                                            m['name'] as String? ?? '',
+                                          ),
+                                          subtitle: Text(
+                                            expiredOnly
+                                                ? 'Expired stock only — cannot sell'
+                                                : '${m['manual_code'] ?? ''} ${m['barcode'] ?? ''}',
+                                            style: expiredOnly
+                                                ? t.textTheme.bodySmall
+                                                      ?.copyWith(
+                                                        color:
+                                                            t.colorScheme.error,
+                                                      )
+                                                : null,
+                                          ),
+                                          onTap: () {
+                                            if (expiredOnly) {
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    'This medicine only has expired batches and cannot be sold.',
                                                   ),
-                                              child: DropdownButtonHideUnderline(
-                                                child: DropdownButton<String>(
-                                                  value: line.selectedBatchId,
-                                                  isExpanded: true,
-                                                  isDense: true,
-                                                  items: line.batchesWithQty
-                                                      .map((b) {
-                                                        final id =
-                                                            b['id'] as String;
-                                                        final bn =
-                                                            b['batch_no']
-                                                                as String? ??
-                                                            '';
-                                                        final qh =
-                                                            b['qty_on_hand']
-                                                                as num? ??
-                                                            0;
-                                                        return DropdownMenuItem<
-                                                          String
-                                                        >(
-                                                          value: id,
-                                                          child: Text(
-                                                            '$bn ($qh)',
+                                                ),
+                                              );
+                                              return;
+                                            }
+                                            _pickMedicine(m);
+                                          },
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        if (_searchMatches.isEmpty &&
+                            _searchCtl.text.trim().isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              branchId == null
+                                  ? 'Select a branch to search salable stock.'
+                                  : 'No search results found (no in-stock matches at this branch).',
+                              style: t.textTheme.bodySmall?.copyWith(
+                                color: t.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: Visibility(
+                      visible: _searchMatches.isEmpty,
+                      maintainState: true,
+                      maintainSize: true,
+                      maintainAnimation: true,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text('Quick cart', style: t.textTheme.titleMedium),
+                          if (_error != null)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Text(
+                                _error!,
+                                style: TextStyle(color: t.colorScheme.error),
+                              ),
+                            ),
+                          Expanded(
+                            child: _lines.isEmpty
+                                ? Align(
+                                    alignment: Alignment.topCenter,
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(top: 8),
+                                      child: Text(
+                                        'Search a medicine to add a line.\nDefault batch = nearest expiry; change below.',
+                                        textAlign: TextAlign.center,
+                                        style: t.textTheme.bodyMedium?.copyWith(
+                                          color: t.colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                : ListView.builder(
+                                    padding: EdgeInsets.zero,
+                                    itemCount: _lines.length,
+                                    itemBuilder: (context, i) {
+                                      final line = _lines[i];
+                                      final qb = _qtyBaseForLine(line);
+                                      final up = line.unitPrice;
+                                      final lineTotal = qb != null
+                                          ? qb * up
+                                          : null;
+                                      final batchIdForDropdown =
+                                          _effectiveBatchIdForLine(line);
+                                      final salableBatches = line.batchesWithQty
+                                          .where(
+                                            (b) => !batchExpiryIsBeforeToday(
+                                              b['expiry_date'],
+                                            ),
+                                          )
+                                          .toList();
+                                      final batchChoices =
+                                          salableBatches.isNotEmpty
+                                          ? salableBatches
+                                          : line.batchesWithQty;
+                                      final selBatch = _selectedBatchMap(line);
+                                      final lineBatchExpired =
+                                          selBatch != null &&
+                                          batchExpiryIsBeforeToday(
+                                            selBatch['expiry_date'],
+                                          );
+                                      return Card(
+                                        margin: const EdgeInsets.only(
+                                          bottom: 4,
+                                        ),
+                                        elevation: 0,
+                                        shadowColor: Colors.transparent,
+                                        color: t.colorScheme.surface,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          side: BorderSide(
+                                            color: i == _selectedLineIndex
+                                                ? t.colorScheme.outline
+                                                      .withValues(alpha: 0.55)
+                                                : t.colorScheme.outlineVariant
+                                                      .withValues(alpha: 0.45),
+                                          ),
+                                        ),
+                                        child: InkWell(
+                                          onTap: () => setState(
+                                            () => _selectedLineIndex = i,
+                                          ),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 8,
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.stretch,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          Text(
+                                                            line.medicineName,
+                                                            style: t
+                                                                .textTheme
+                                                                .titleSmall,
+                                                            maxLines: 1,
                                                             overflow:
                                                                 TextOverflow
                                                                     .ellipsis,
                                                           ),
-                                                        );
-                                                      })
-                                                      .toList(),
-                                                  onChanged: (v) {
-                                                    if (v == null) return;
-                                                    setState(
-                                                      () =>
-                                                          line.selectedBatchId =
-                                                              v,
-                                                    );
-                                                    _syncDirtyState();
-                                                  },
+                                                          Text(
+                                                            line.manualCode,
+                                                            style: t
+                                                                .textTheme
+                                                                .labelSmall,
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    SizedBox(
+                                                      width: 90,
+                                                      child: Text(
+                                                        lineTotal == null
+                                                            ? '-'
+                                                            : lineTotal
+                                                                  .toStringAsFixed(
+                                                                    2,
+                                                                  ),
+                                                        textAlign:
+                                                            TextAlign.end,
+                                                      ),
+                                                    ),
+                                                    IconButton(
+                                                      icon: const Icon(
+                                                        Icons.delete_outline,
+                                                      ),
+                                                      onPressed: () =>
+                                                          _removeLine(i),
+                                                    ),
+                                                  ],
                                                 ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        IconButton(
-                                          onPressed: () => _adjustQty(line, -1),
-                                          visualDensity: VisualDensity.compact,
-                                          constraints: const BoxConstraints(
-                                            minWidth: 32,
-                                            minHeight: 32,
-                                          ),
-                                          icon: const Icon(Icons.remove),
-                                        ),
-                                        SizedBox(
-                                          width: 22,
-                                          child: Text(
-                                            '${line.qtyBase}',
-                                            textAlign: TextAlign.center,
-                                          ),
-                                        ),
-                                        IconButton(
-                                          onPressed: () => _adjustQty(line, 1),
-                                          visualDensity: VisualDensity.compact,
-                                          constraints: const BoxConstraints(
-                                            minWidth: 32,
-                                            minHeight: 32,
-                                          ),
-                                          icon: const Icon(Icons.add),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        SizedBox(
-                                          width: 112,
-                                          child: TextField(
-                                            controller: line.priceController,
-                                            keyboardType:
-                                                const TextInputType.numberWithOptions(
-                                                  decimal: true,
-                                                ),
-                                            decoration: const InputDecoration(
-                                              labelText: 'Price',
-                                              isDense: true,
-                                              contentPadding:
-                                                  EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 10,
+                                                if (lineBatchExpired) ...[
+                                                  const SizedBox(height: 6),
+                                                  DecoratedBox(
+                                                    decoration: BoxDecoration(
+                                                      color: t
+                                                          .colorScheme
+                                                          .errorContainer,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            8,
+                                                          ),
+                                                    ),
+                                                    child: Padding(
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                            8,
+                                                          ),
+                                                      child: Text(
+                                                        'This batch is expired and cannot be sold. Change batch or remove this line.',
+                                                        style: t
+                                                            .textTheme
+                                                            .bodySmall
+                                                            ?.copyWith(
+                                                              color: t
+                                                                  .colorScheme
+                                                                  .onErrorContainer,
+                                                            ),
+                                                      ),
+                                                    ),
                                                   ),
-                                            ),
-                                            onChanged: (value) {
-                                              final parsed = num.tryParse(
-                                                value.trim(),
-                                              );
-                                              if (parsed == null) return;
-                                              setState(() {
-                                                line.overridePrice =
-                                                    (parsed - line.listPricePerBase)
-                                                            .abs() >
-                                                        0.0001
-                                                    ? parsed
-                                                    : null;
-                                                if (line.overridePrice ==
-                                                    null) {
-                                                  line.overrideReason = null;
-                                                  line.reasonController.clear();
-                                                }
-                                              });
-                                              _syncDirtyState();
-                                            },
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    if (_showPriceReason(line))
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 8),
-                                        child: TextField(
-                                          controller: line.reasonController,
-                                          decoration: const InputDecoration(
-                                            labelText:
-                                                'Override reason (optional)',
-                                            labelStyle: TextStyle(
-                                              fontSize: 13,
-                                            ),
-                                           
-                                            helperText:
-                                                'Applies only to this sale line.',
-                                            isDense: true,
-                                            contentPadding:
-                                                EdgeInsets.symmetric(
-                                                  horizontal: 10,
-                                                  vertical: 10,
+                                                ],
+                                                const SizedBox(height: 6),
+                                                Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: DecoratedBox(
+                                                        decoration: BoxDecoration(
+                                                          color: t
+                                                              .colorScheme
+                                                              .surfaceContainerHighest,
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                2,
+                                                              ),
+                                                          border: Border.all(
+                                                            color: t
+                                                                .colorScheme
+                                                                .outlineVariant,
+                                                          ),
+                                                        ),
+                                                        child: Padding(
+                                                          padding:
+                                                              const EdgeInsets.symmetric(
+                                                                horizontal: 10,
+                                                              ),
+                                                          child: DropdownButtonHideUnderline(
+                                                            child: DropdownButton<String>(
+                                                              value:
+                                                                  batchIdForDropdown,
+                                                              isExpanded: true,
+                                                              isDense: true,
+                                                              items: batchChoices.map((
+                                                                b,
+                                                              ) {
+                                                                final id =
+                                                                    b['id']
+                                                                        as String;
+                                                                final bn =
+                                                                    b['batch_no']
+                                                                        as String? ??
+                                                                    '';
+                                                                final qh =
+                                                                    b['qty_on_hand']
+                                                                        as num? ??
+                                                                    0;
+                                                                final exp =
+                                                                    batchExpiryIsBeforeToday(
+                                                                      b['expiry_date'],
+                                                                    );
+                                                                return DropdownMenuItem<
+                                                                  String
+                                                                >(
+                                                                  value: id,
+                                                                  child: Text(
+                                                                    exp
+                                                                        ? '$bn ($qh, expired)'
+                                                                        : '$bn ($qh)',
+                                                                    overflow:
+                                                                        TextOverflow
+                                                                            .ellipsis,
+                                                                  ),
+                                                                );
+                                                              }).toList(),
+                                                              onChanged: (v) {
+                                                                if (v == null)
+                                                                  return;
+                                                                setState(() {
+                                                                  line.selectedBatchId = v;
+                                                                  if (line.overridePrice == null) {
+                                                                    line.priceController.text =
+                                                                        line.listPricePerBase.toStringAsFixed(2);
+                                                                  }
+                                                                });
+                                                                _syncDirtyState();
+                                                              },
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                    IconButton(
+                                                      onPressed: () =>
+                                                          _adjustQty(line, -1),
+                                                      visualDensity:
+                                                          VisualDensity.compact,
+                                                      constraints:
+                                                          const BoxConstraints(
+                                                            minWidth: 32,
+                                                            minHeight: 32,
+                                                          ),
+                                                      icon: const Icon(
+                                                        Icons.remove,
+                                                      ),
+                                                    ),
+                                                    SizedBox(
+                                                      width: 22,
+                                                      child: Text(
+                                                        '${line.qtyBase}',
+                                                        textAlign:
+                                                            TextAlign.center,
+                                                      ),
+                                                    ),
+                                                    IconButton(
+                                                      onPressed: () =>
+                                                          _adjustQty(line, 1),
+                                                      visualDensity:
+                                                          VisualDensity.compact,
+                                                      constraints:
+                                                          const BoxConstraints(
+                                                            minWidth: 32,
+                                                            minHeight: 32,
+                                                          ),
+                                                      icon: const Icon(
+                                                        Icons.add,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 10),
+                                                    SizedBox(
+                                                      width: 112,
+                                                      child: TextField(
+                                                        controller: line
+                                                            .priceController,
+                                                        keyboardType:
+                                                            const TextInputType.numberWithOptions(
+                                                              decimal: true,
+                                                            ),
+                                                        decoration:
+                                                            const InputDecoration(
+                                                              labelText:
+                                                                  'Price',
+                                                              isDense: true,
+                                                              contentPadding:
+                                                                  EdgeInsets.symmetric(
+                                                                    horizontal:
+                                                                        10,
+                                                                    vertical:
+                                                                        10,
+                                                                  ),
+                                                            ),
+                                                        onChanged: (value) {
+                                                          final parsed =
+                                                              num.tryParse(
+                                                                value.trim(),
+                                                              );
+                                                          if (parsed == null)
+                                                            return;
+                                                          setState(() {
+                                                            line.overridePrice =
+                                                                (parsed -
+                                                                            line.listPricePerBase)
+                                                                        .abs() >
+                                                                    0.0001
+                                                                ? parsed
+                                                                : null;
+                                                            if (line.overridePrice ==
+                                                                null) {
+                                                              line.overrideReason =
+                                                                  null;
+                                                              line.reasonController
+                                                                  .clear();
+                                                            }
+                                                          });
+                                                          _syncDirtyState();
+                                                        },
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
+                                                if (_showPriceReason(line))
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                          top: 8,
+                                                        ),
+                                                    child: TextField(
+                                                      controller:
+                                                          line.reasonController,
+                                                      decoration: const InputDecoration(
+                                                        labelText:
+                                                            'Override reason (optional)',
+                                                        labelStyle: TextStyle(
+                                                          fontSize: 13,
+                                                        ),
+
+                                                        helperText:
+                                                            'Applies only to this sale line.',
+                                                        isDense: true,
+                                                        contentPadding:
+                                                            EdgeInsets.symmetric(
+                                                              horizontal: 10,
+                                                              vertical: 10,
+                                                            ),
+                                                      ),
+                                                      onChanged: (value) {
+                                                        setState(
+                                                          () =>
+                                                              line.overrideReason =
+                                                                  value.trim(),
+                                                        );
+                                                        _syncDirtyState();
+                                                      },
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
                                           ),
-                                          onChanged: (value) {
-                                            setState(
-                                              () => line.overrideReason = value
-                                                  .trim(),
-                                            );
-                                            _syncDirtyState();
-                                          },
                                         ),
+                                      );
+                                    },
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Material(
+                    elevation: 4,
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'Subtotal: ${_cartSubtotal.toStringAsFixed(2)} ETB',
+                            textAlign: TextAlign.right,
+                          ),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _discountCtl,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                        decimal: true,
                                       ),
-                                  ],
+                                  decoration: const InputDecoration(
+                                    labelText: 'Discount (ETB)',
+                                    isDense: true,
+                                  ),
+                                  onChanged: (_) {
+                                    setState(() {});
+                                    _syncDirtyState();
+                                  },
                                 ),
                               ),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              Material(
-                elevation: 4,
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Subtotal: ${_cartSubtotal.toStringAsFixed(2)} ETB',
-                        textAlign: TextAlign.right,
-                      ),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _discountCtl,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'Total: ${_cartTotal.toStringAsFixed(2)} ETB',
+                                  textAlign: TextAlign.right,
+                                  style: t.textTheme.titleMedium,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          SegmentedButton<String>(
+                            segments: const [
+                              ButtonSegment<String>(
+                                value: 'cash',
+                                label: Text('Cash'),
+                              ),
+                              ButtonSegment<String>(
+                                value: 'mobile_banking',
+                                label: Text('Mobile'),
+                              ),
+                            ],
+                            selected: {_paymentMethod},
+                            onSelectionChanged: (selection) {
+                              setState(() => _paymentMethod = selection.first);
+                              _syncDirtyState();
+                            },
+                          ),
+                          if (_paymentMethod == 'mobile_banking') ...[
+                            const SizedBox(height: 6),
+                            TextField(
+                              controller: _referenceNo,
                               decoration: const InputDecoration(
-                                labelText: 'Discount (ETB)',
+                                labelText: 'Mobile payment ref (optional)',
                                 isDense: true,
                               ),
-                              onChanged: (_) {
-                                setState(() {});
-                                _syncDirtyState();
-                              },
+                              onChanged: (_) => _syncDirtyState(),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              'Total: ${_cartTotal.toStringAsFixed(2)} ETB',
-                              textAlign: TextAlign.right,
-                              style: t.textTheme.titleMedium,
-                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          FilledButton(
+                            onPressed: (_checkoutLoading || _lines.isEmpty)
+                                ? null
+                                : _checkout,
+                            child: _checkoutLoading
+                                ? const SizedBox(
+                                    height: 22,
+                                    width: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text('Finish sale'),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 6),
-                      SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment<String>(
-                            value: 'cash',
-                            label: Text('Cash'),
-                          ),
-                          ButtonSegment<String>(
-                            value: 'mobile_banking',
-                            label: Text('Mobile'),
-                          ),
-                        ],
-                        selected: {_paymentMethod},
-                        onSelectionChanged: (selection) {
-                          setState(() => _paymentMethod = selection.first);
-                          _syncDirtyState();
-                        },
-                      ),
-                      if (_paymentMethod == 'mobile_banking') ...[
-                        const SizedBox(height: 6),
-                        TextField(
-                          controller: _referenceNo,
-                          decoration: const InputDecoration(
-                            labelText: 'Mobile payment ref (optional)',
-                            isDense: true,
-                          ),
-                          onChanged: (_) => _syncDirtyState(),
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      FilledButton(
-                        onPressed: (_checkoutLoading || _lines.isEmpty)
-                            ? null
-                            : _checkout,
-                        child: _checkoutLoading
-                            ? const SizedBox(
-                                height: 22,
-                                width: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text('Checkout'),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );

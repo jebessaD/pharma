@@ -3,9 +3,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/widgets/pharmacy_page_app_bar.dart';
 
-/// Support contact (Telegram).
+/// Support contacts (Telegram + email).
 const kSupportTelegramUrl = 'https://t.me/dadu_dev';
 const kSupportTelegramHandle = '@dadu_dev';
+const kSupportEmail = 'dadudevstudio@gmail.com';
 
 class ContactUsPage extends StatelessWidget {
   const ContactUsPage({super.key});

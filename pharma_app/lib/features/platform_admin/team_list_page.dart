@@ -1,11 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/auth/auth_persistence.dart';
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/providers/pharmacy_profile_provider.dart';
+import '../../core/providers/pharmacy_redirect_cache_provider.dart';
+import '../../core/providers/post_pharmacy_sign_out.dart';
+import '../../core/shared_preferences_provider.dart';
 import '../../core/widgets/app_error_state.dart';
 
 class TeamListPage extends StatefulWidget {
@@ -37,10 +40,18 @@ class _TeamListPageState extends State<TeamListPage> {
   }
 
   Future<void> _signOut() async {
+    if (!mounted) return;
+    final container = ProviderScope.containerOf(context, listen: false);
+    final prevTeam = container.read(pharmacyProfileProvider).value?['team_id']
+            as String? ??
+        container.read(pharmacyRedirectCacheProvider)?.teamId;
+    final prefs = container.read(sharedPreferencesProvider);
     await Supabase.instance.client.auth.signOut();
-    final prefs = await SharedPreferences.getInstance();
-    await clearLocalAuthMarker(prefs);
-    if (mounted) context.go('/login');
+    schedulePharmacySignOutCleanup(
+      container: container,
+      prefs: prefs,
+      teamId: prevTeam,
+    );
   }
 
   @override

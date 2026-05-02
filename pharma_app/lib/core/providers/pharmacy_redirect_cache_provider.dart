@@ -1,11 +1,10 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Cached profile + team status for [GoRouter.redirect] to avoid a round-trip on every navigation.
 class PharmacyGateData {
   PharmacyGateData({
+    required this.userId,
     required this.role,
     required this.teamId,
     required this.isActiveUser,
@@ -17,6 +16,8 @@ class PharmacyGateData {
     required this.fetchedAt,
   });
 
+  /// Auth user this row was loaded for (avoids reusing another account after sign-out/sign-in).
+  final String userId;
   final String? role;
   final String? teamId;
   final bool isActiveUser;
@@ -75,11 +76,11 @@ class PharmacyRedirectCacheNotifier extends Notifier<PharmacyGateData?> {
       return;
     }
     final cur = state;
-    if (cur != null && !cur.stale) return;
-    if (cur != null && cur.stale) {
-      unawaited(_refresh(userId));
+    if (cur != null && cur.userId != userId) {
+      await _refresh(userId);
       return;
     }
+    if (cur != null && cur.userId == userId && !cur.stale) return;
     await _refresh(userId);
   }
 
@@ -142,6 +143,7 @@ class PharmacyRedirectCacheNotifier extends Notifier<PharmacyGateData?> {
       pharmacyName = tp?['pharmacy_name'] as String?;
     }
     state = PharmacyGateData(
+      userId: userId,
       role: role,
       teamId: teamId,
       isActiveUser: isActiveUser,

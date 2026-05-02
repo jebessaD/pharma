@@ -43,3 +43,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Play upload keystore (never commit)
+/android/key.properties
+/android/*.jks
+/android/*.keystore
+
+# Local compile-time defines (never commit)
+/tool/dart_defines.local.json

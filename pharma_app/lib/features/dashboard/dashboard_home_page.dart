@@ -50,7 +50,18 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
       _error = null;
     });
     try {
-      final m = await _loadDashboardMetrics(teamId, branchId);
+      var m = await _loadDashboardMetrics(teamId, branchId);
+      final role =
+          (profile?['role'] as String? ?? '').trim().toLowerCase();
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (role == 'pharmacist' && uid != null) {
+        m = await _mergePharmacistOwnSalesKpis(
+          Map<String, dynamic>.from(m as Map),
+          teamId,
+          branchId,
+          uid,
+        );
+      }
       final unreadRows = await Supabase.instance.client
           .from('notifications')
           .select('id')
@@ -59,7 +70,7 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
           .eq('is_read', false)
           .limit(500);
       setState(() {
-        _metrics = Map<String, dynamic>.from(m as Map);
+        _metrics = Map<String, dynamic>.from(m);
         _unread = (unreadRows as List).length;
         _lastUpdated = DateTime.now();
       });
@@ -84,31 +95,88 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
   }
 
   Future<dynamic> _loadDashboardMetrics(String teamId, String branchId) async {
-    final params = {
-      'p_team_id': teamId,
-      'p_branch_id': branchId,
-      'p_category_ids': _selectedCategoryIds.isEmpty
-          ? null
-          : _selectedCategoryIds.toList(growable: false),
-    };
-    try {
-      return await Supabase.instance.client.rpc(
-        'dashboard_metrics',
-        params: params,
+    return Supabase.instance.client.rpc(
+      'dashboard_metrics',
+      params: {
+        'p_team_id': teamId,
+        'p_branch_id': branchId,
+        'p_category_ids': _selectedCategoryIds.isEmpty
+            ? null
+            : _selectedCategoryIds.toList(growable: false),
+      },
+    );
+  }
+
+  static DateTime _dateOnly(DateTime d) =>
+      DateTime(d.year, d.month, d.day);
+
+  /// Pharmacist: replace branch-wide sales KPIs with this user's sales only
+  /// (via unified report + client-side distinct sale_id), no DB migration.
+  Future<Map<String, dynamic>> _mergePharmacistOwnSalesKpis(
+    Map<String, dynamic> base,
+    String teamId,
+    String branchId,
+    String userId,
+  ) async {
+    final fmt = DateFormat('yyyy-MM-dd');
+    final today = _dateOnly(DateTime.now());
+    final catIds = _selectedCategoryIds.isEmpty
+        ? null
+        : _selectedCategoryIds.toList(growable: false);
+
+    Future<(num total, int count)> totalsForRange(
+      DateTime from,
+      DateTime to,
+    ) async {
+      final data = await Supabase.instance.client.rpc(
+        'rpc_report_sales_unified',
+        params: {
+          'p_team_id': teamId,
+          'p_branch_id': branchId,
+          'p_from': fmt.format(from),
+          'p_to': fmt.format(to),
+          'p_sold_by': userId,
+          'p_min_amount': null,
+          'p_max_amount': null,
+          'p_payment_method': null,
+          'p_overrides_only': false,
+          'p_category_ids': catIds,
+        },
       );
-    } on PostgrestException catch (e) {
-      final text = '${e.message} ${e.details ?? ''} ${e.hint ?? ''}'
-          .toLowerCase();
-      final expectsOldSignature =
-          text.contains('p_category_ids') || text.contains('function');
-      if (!expectsOldSignature || _selectedCategoryIds.isNotEmpty) rethrow;
-      final legacyParams = Map<String, dynamic>.from(params)
-        ..remove('p_category_ids');
-      return Supabase.instance.client.rpc(
-        'dashboard_metrics',
-        params: legacyParams,
-      );
+      final rows =
+          List<Map<String, dynamic>>.from(data as List? ?? const []);
+      final seen = <String>{};
+      num grand = 0;
+      for (final r in rows) {
+        final sid = '${r['sale_id'] ?? ''}'.trim();
+        if (sid.isEmpty || !seen.add(sid)) continue;
+        grand += (r['grand_total'] as num?) ?? 0;
+      }
+      return (grand, seen.length);
     }
+
+    final (todayTotal, todayCount) = await totalsForRange(today, today);
+    final (w7Total, w7Count) = await totalsForRange(
+      today.subtract(const Duration(days: 6)),
+      today,
+    );
+    final (w30Total, _) = await totalsForRange(
+      today.subtract(const Duration(days: 29)),
+      today,
+    );
+
+    base['today_sales_total'] = todayTotal;
+    base['today_sales_count'] = todayCount;
+    base['sales_7d_total'] = w7Total;
+    base['sales_mtd_total'] = w30Total;
+    base['sales_by_staff_7d'] = [
+      {
+        'name': 'My sales',
+        'sale_count': w7Count,
+        'total': w7Total,
+      },
+    ];
+    return base;
   }
 
   @override
@@ -160,6 +228,14 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
                   final gridColumns = constraints.maxWidth >= 960
                       ? 3
                       : (constraints.maxWidth >= 360 ? 2 : 1);
+                  final role = (ref
+                              .watch(pharmacyProfileProvider)
+                              .asData
+                              ?.value?['role'] as String? ??
+                          '')
+                      .trim()
+                      .toLowerCase();
+                  final isPharmacist = role == 'pharmacist';
                   return ListView(
                     padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
                     children: [
@@ -189,38 +265,49 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
                           children: [
                             _metricCard(
                               context,
-                              title: 'Today sales total',
+                              title: isPharmacist
+                                  ? 'Your sales today'
+                                  : 'Today sales total',
                               value: _money(_metrics!['today_sales_total']),
                               route: '/pharmacy/reports/sales_summary',
                               icon: Icons.payments_rounded,
                             ),
                             _metricCard(
                               context,
-                              title: 'Today sales count',
+                              title: isPharmacist
+                                  ? 'Your sales count today'
+                                  : 'Today sales count',
                               value: _formatMetric(_metrics!['today_sales_count'], decimals: 0),
                               route: '/pharmacy/reports/sales_summary',
                               icon: Icons.receipt_long_rounded,
                             ),
+                            if (!isPharmacist)
+                              _metricCard(
+                                context,
+                                title: 'Today gross profit',
+                                value: _money(_metrics!['today_profit_total'] ?? 0),
+                                route: '/pharmacy/reports/profit_summary',
+                                icon: Icons.trending_up_rounded,
+                              ),
                             _metricCard(
                               context,
-                              title: 'Today gross profit',
-                              value: _money(_metrics!['today_profit_total'] ?? 0),
-                              route: '/pharmacy/reports/profit_summary',
-                              icon: Icons.trending_up_rounded,
-                            ),
-                            _metricCard(
-                              context,
-                              title: 'Sales (last 7 days)',
+                              title: isPharmacist
+                                  ? 'Your sales (7 days)'
+                                  : 'Sales (last 7 days)',
                               value: _money(_metrics!['sales_7d_total'] ?? 0),
                               route: '/pharmacy/reports/sales_summary',
                               icon: Icons.view_week_rounded,
                             ),
                             _metricCard(
                               context,
-                              title: 'Sales (month to date)',
+                              title: isPharmacist
+                                  ? 'Your sales (30 days)'
+                                  : 'Sales (month to date)',
                               value: _money(_metrics!['sales_mtd_total'] ?? 0),
                               route: '/pharmacy/reports/sales_summary',
-                              icon: Icons.calendar_month_rounded,
+                              icon: isPharmacist
+                                  ? Icons.date_range_rounded
+                                  : Icons.calendar_month_rounded,
                             ),
                           ],
                         ),
@@ -262,20 +349,28 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
                             ),
                           ],
                         ),
+                        if (!isPharmacist) ...[
+                          const SizedBox(height: 14),
+                          _sectionTitle(context, 'Top sales by medicine (7 days)'),
+                          const SizedBox(height: 8),
+                          Card(
+                            clipBehavior: Clip.antiAlias,
+                            child: _topSellersBody(context, _metrics!['top_sellers_7d']),
+                          ),
+                        ],
                         const SizedBox(height: 14),
-                        _sectionTitle(context, 'Top sales by medicine (7 days)'),
-                        const SizedBox(height: 8),
-                        Card(
-                          clipBehavior: Clip.antiAlias,
-                          child: _topSellersBody(context, _metrics!['top_sellers_7d']),
+                        _sectionTitle(
+                          context,
+                          isPharmacist
+                              ? 'My sales (7 days)'
+                              : 'Sales by staff (7 days)',
                         ),
-                        const SizedBox(height: 14),
-                        _sectionTitle(context, 'Sales by staff (7 days)'),
                         const SizedBox(height: 8),
                         Card(
                           clipBehavior: Clip.antiAlias,
                           child: InkWell(
-                            onTap: () => context.go('/pharmacy/reports/sales_by_staff'),
+                            onTap: () =>
+                                context.push('/pharmacy/reports/sales_by_staff'),
                             child: _staffSalesBody(context, _metrics!['sales_by_staff_7d']),
                           ),
                         ),
@@ -448,16 +543,6 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
       runSpacing: 8,
       children: [
         FilledButton.tonalIcon(
-          onPressed: () => context.go('/pharmacy/pos'),
-          icon: const Icon(Icons.point_of_sale_outlined),
-          label: const Text('POS'),
-        ),
-        FilledButton.tonalIcon(
-          onPressed: () => context.go('/pharmacy/stock-in'),
-          icon: const Icon(Icons.add_shopping_cart_outlined),
-          label: const Text('Stock in'),
-        ),
-        FilledButton.tonalIcon(
           onPressed: () => context.go('/pharmacy/reports'),
           icon: const Icon(Icons.table_chart_outlined),
           label: const Text('Report tables'),
@@ -606,7 +691,7 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: route == null ? null : () => context.go(route),
+        onTap: route == null ? null : () => context.push(route),
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),

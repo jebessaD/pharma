@@ -45,7 +45,7 @@ class UpdateRequiredPage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'A newer version of Pharma is required to continue.',
+                  'A newer version of Pharma Shelf is required to continue.',
                   style: Theme.of(context).textTheme.titleMedium,
                   textAlign: TextAlign.center,
                 ),
