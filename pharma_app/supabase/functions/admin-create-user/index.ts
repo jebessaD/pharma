@@ -37,6 +37,21 @@ function staffLoginEmail(username: string): string {
   return `${username}@${STAFF_EMAIL_DOMAIN}`;
 }
 
+/** Map GoTrue duplicate-email / unique violations to a stable client-facing code. */
+function mapAuthCreateUserError(err: { message?: string } | null): string {
+  const m = (err?.message ?? "").toLowerCase();
+  if (
+    m.includes("already been registered") ||
+    m.includes("already registered") ||
+    m.includes("user already exists") ||
+    m.includes("duplicate") ||
+    m.includes("unique constraint")
+  ) {
+    return "email_taken";
+  }
+  return err?.message ?? "create_user_failed";
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { status: 200, headers: corsHeaders });
@@ -189,7 +204,8 @@ Deno.serve(async (req: Request) => {
       email_confirm: true,
     });
   if (createUserError != null || createdUserData.user == null) {
-    return new Response(createUserError?.message ?? "create_user_failed", {
+    const msg = mapAuthCreateUserError(createUserError);
+    return new Response(msg, {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "text/plain" },
     });

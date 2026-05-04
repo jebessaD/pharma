@@ -42,7 +42,7 @@ class PharmacyShell extends ConsumerWidget {
 
   static List<_Section> _sectionsForRole(String role) {
     const home = _Dest(
-      path: '/pharmacy/home',
+      path: '/pharmacy',
       label: 'Home',
       icon: Icons.home_rounded,
     );

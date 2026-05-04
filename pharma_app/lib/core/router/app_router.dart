@@ -71,7 +71,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         await ref.read(appUpdateGateNotifierProvider.notifier).ensureHydrated();
         final ug = ref.read(appUpdateGateNotifierProvider);
         if (ug?.blocked != true) {
-          return session != null ? '/pharmacy/home' : '/login';
+          return session != null ? '/pharmacy' : '/login';
         }
         return null;
       }
@@ -95,7 +95,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         const adminAllowed = <String>['/pharmacy'];
         const ownerAllowed = <String>['/pharmacy'];
         const pharmacistAllowed = <String>[
-          '/pharmacy/home',
           '/pharmacy/pos',
           '/pharmacy/medicines',
           '/pharmacy/stock',
@@ -110,12 +109,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           '/pharmacy/contact',
         ];
         const cashierAllowed = <String>[
-          '/pharmacy/home',
           '/pharmacy/pos',
           '/pharmacy/receipt',
           '/pharmacy/platform-messages',
           '/pharmacy/contact',
         ];
+        if (path == '/pharmacy') return true;
         final allowed = switch (role) {
           'admin' => adminAllowed,
           'owner' => ownerAllowed,
@@ -129,7 +128,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
 
       if (loc == '/trial-ended' && session == null) return '/login';
       if (loc == '/billing-blocked' && session == null) return '/login';
-      if (loc == '/signup' && session != null) return '/pharmacy/home';
+      if (loc == '/signup' && session != null) return '/pharmacy';
 
       if (loc == '/trial-ended' && session != null && userId != null) {
         try {
@@ -138,7 +137,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               .hydrate(userId);
           final g = ref.read(pharmacyRedirectCacheProvider);
           if (g != null && !g.shouldShowTrialEndedRoute) {
-            return '/pharmacy/home';
+            return '/pharmacy';
           }
         } catch (_) {
           /* offline: allow staying on trial page */
@@ -152,7 +151,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               .hydrate(userId);
           final g = ref.read(pharmacyRedirectCacheProvider);
           if (g != null && !g.shouldShowBillingBlockedRoute) {
-            return '/pharmacy/home';
+            return '/pharmacy';
           }
         } catch (_) {
           /* offline */
@@ -168,9 +167,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               .eq('id', userId ?? '')
               .maybeSingle();
           final isActiveAdmin = admin?['is_active'] == true;
-          if (!isActiveAdmin) return '/pharmacy/home';
+          if (!isActiveAdmin) return '/pharmacy';
         } catch (e) {
-          if (!isOnline || isConnectivityRelated(e)) return '/pharmacy/home';
+          if (!isOnline || isConnectivityRelated(e)) return '/pharmacy';
           rethrow;
         }
         return null;
@@ -195,7 +194,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             return '/trial-ended';
           }
           if (gate.role != null && !isAllowedForRole(gate.role!, loc)) {
-            return '/pharmacy/home';
+            return '/pharmacy';
           }
           if (gate.role == 'pharmacist') {
             const pharmacistBlockedReportPaths = <String>[
@@ -220,7 +219,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       }
 
       if (loc == '/splash') return null;
-      if (loc == '/' && session != null) return '/pharmacy/home';
+      if (loc == '/' && session != null) return '/pharmacy';
 
       final authRefresh = ref.read(supabaseAuthRefreshProvider);
 
@@ -274,14 +273,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             }
           }
           ref.invalidate(pharmacyRedirectCacheProvider);
-          return '/pharmacy/home';
+          return '/pharmacy';
         }
         return null;
       }
 
       if (loc == '/reset-password') {
         if (session == null) return '/login';
-        if (!authRefresh.passwordRecoveryPending) return '/pharmacy/home';
+        if (!authRefresh.passwordRecoveryPending) return '/pharmacy';
         return null;
       }
 
@@ -289,7 +288,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       // PKCE code and fires onAuthStateChange. Redirect authenticated users
       // away from auth screens automatically.
       if ((loc == '/login' || loc == '/signup') && session != null) {
-        return '/pharmacy/home';
+        return '/pharmacy';
       }
       if (loc == '/login') return null;
       if (loc == '/signup') return null;
@@ -344,17 +343,16 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '/update-required',
         builder: (context, state) => const UpdateRequiredPage(),
       ),
-      GoRoute(
-        path: '/pharmacy',
-        redirect: (context, state) =>
-            state.uri.path == '/pharmacy' ? '/pharmacy/home' : null,
+      ShellRoute(
+        builder: (context, state, child) => PharmacyShell(child: child),
         routes: [
-          ShellRoute(
-            builder: (context, state, child) => PharmacyShell(child: child),
+          GoRoute(
+            path: '/pharmacy',
+            builder: (context, state) => const PharmacyHomePage(),
             routes: [
               GoRoute(
                 path: 'home',
-                builder: (context, state) => const PharmacyHomePage(),
+                redirect: (context, state) => '/pharmacy',
               ),
               GoRoute(
                 path: 'team-profile',
@@ -371,7 +369,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                       .hydrate(user.id);
                   final role = ref.read(pharmacyRedirectCacheProvider)?.role;
                   if (role != 'admin' && role != 'owner') {
-                    return '/pharmacy/home';
+                    return '/pharmacy';
                   }
                   return null;
                 },
@@ -395,7 +393,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                       .hydrate(user.id);
                   final role = ref.read(pharmacyRedirectCacheProvider)?.role;
                   if (role != 'admin' && role != 'owner') {
-                    return '/pharmacy/home';
+                    return '/pharmacy';
                   }
                   if (state.uri.path == '/pharmacy/staff') {
                     return '/pharmacy/organization?tab=staff';

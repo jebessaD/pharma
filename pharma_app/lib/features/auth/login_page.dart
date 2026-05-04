@@ -189,7 +189,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
       if (!mounted) return;
       didNavigate = true;
-      context.go('/pharmacy/home');
+      context.go('/pharmacy');
     } catch (e) {
       if (mounted) setState(() => _error = userFacingError(e));
     } finally {

@@ -111,6 +111,9 @@ String _userFacingFunction(FunctionException e) {
   if (lower == 'username_taken') {
     return 'This username is already taken (it may be in use by another pharmacy). Pick another.';
   }
+  if (lower == 'email_taken') {
+    return 'That login email is already in use. Pick a different username.';
+  }
   if (lower == 'invalid_username' || lower == 'missing_username') {
     return 'Enter a valid username (3–32 characters: letters, numbers, underscores).';
   }
@@ -145,7 +148,7 @@ String _userFacingFunction(FunctionException e) {
       lower.contains('user already registered') ||
       lower.contains('email address has already been') ||
       (lower.contains('duplicate') && lower.contains('key'))) {
-    return 'This sign-in address is already in use. Try a different username or remove the existing user in Supabase Auth first.';
+    return 'This sign-in address is already in use. Try a different username.';
   }
   if (lower.contains('password') && (lower.contains('weak') || lower.contains('at least'))) {
     return 'Password is too weak. Use at least 8 characters, or follow your organization rules.';

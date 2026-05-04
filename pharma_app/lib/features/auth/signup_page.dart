@@ -124,7 +124,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
       ref.invalidate(pharmacyRedirectCacheProvider);
       if (!mounted) return;
       didNavigate = true;
-      context.go('/pharmacy/home');
+      context.go('/pharmacy');
     } on AuthException catch (e) {
       setState(() {
         _successMessage = null;
@@ -136,7 +136,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
         ref.invalidate(pharmacyRedirectCacheProvider);
         if (!mounted) return;
         didNavigate = true;
-        context.go('/pharmacy/home');
+        context.go('/pharmacy');
         return;
       }
       setState(() {
