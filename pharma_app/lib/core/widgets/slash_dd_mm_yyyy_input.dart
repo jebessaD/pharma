@@ -126,7 +126,7 @@ String? slashDdMmYyyyExpiryError(String raw, DateTime today) {
 String? slashDdMmYyyySoftError(String raw) {
   final d = _digitsOnly(raw);
   if (d.isEmpty) return null;
-  if (d.length >= 1) {
+  if (d.isNotEmpty) {
     final m1 = int.tryParse(d[0]);
     if (m1 == null) return 'Use digits only';
     if (d.length == 1 && m1 > 3) return 'Invalid month';

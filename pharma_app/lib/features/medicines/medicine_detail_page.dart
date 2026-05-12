@@ -348,7 +348,6 @@ class _MedicineDetailPageState extends ConsumerState<MedicineDetailPage> {
         ),
       );
     }
-    final m = _medicine!;
     return Scaffold(
       appBar: AppBar(title: Text(_nameCtl.text.trim().isEmpty ? 'Medicine' : _nameCtl.text.trim())),
       body: ListView(

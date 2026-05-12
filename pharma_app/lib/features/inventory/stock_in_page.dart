@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/utils/refresh_alerts_silent.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
+import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/providers/branch_change_guard_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/widgets/slash_dd_mm_yyyy_input.dart';
@@ -378,6 +380,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
           'p_ref_id': null,
         },
       );
+      await refreshAlertsSilent(teamId: teamId, branchId: branchId);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -476,6 +479,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
       );
       return;
     }
+    if (!mounted) return;
 
     final formKey = GlobalKey<FormState>();
     final name = TextEditingController();
@@ -609,9 +613,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
                                 .single();
                             if (!dialogContext.mounted) return;
                             Navigator.of(dialogContext).pop(
-                              Map<String, dynamic>.from(
-                                inserted as Map<String, dynamic>,
-                              ),
+                              Map<String, dynamic>.from(inserted),
                             );
                           } catch (e) {
                             if (!dialogContext.mounted) return;
@@ -953,6 +955,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
         'bulk_stock_in',
         params: {'p_branch_id': branchId, 'p_items': items},
       );
+      await refreshAlertsSilent(teamId: teamId, branchId: branchId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1128,6 +1131,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
   }
 
   Widget _singleHeader() {
+    final isPharmacist = ref.watch(pharmacyRedirectCacheProvider)?.role ==
+        'pharmacist';
     final selected = _medicines.cast<Map<String, dynamic>?>().firstWhere(
       (m) => m?['id'] == _selectedMedicineId,
       orElse: () => null,
@@ -1174,7 +1179,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
                 label: const Text('Scan'),
               ),
               const SizedBox(width: 8),
-              if (_selectedMedicineId == null)
+              if (_selectedMedicineId == null && !isPharmacist)
                 OutlinedButton.icon(
                   onPressed: () =>
                       _showAddMedicineDialog(target: _LookupTarget.single),
@@ -1231,6 +1236,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
   }
 
   Widget _bulkHeader() {
+    final isPharmacist = ref.watch(pharmacyRedirectCacheProvider)?.role ==
+        'pharmacist';
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     final t = Theme.of(context).textTheme;
     Widget compactAction({
@@ -1273,14 +1280,15 @@ class _StockInPageState extends ConsumerState<StockInPage>
               label: 'Scan row ${_activeBulkIndex + 1}',
               primary: true,
             ),
-            compactAction(
-              onPressed: () => _showAddMedicineDialog(
-                target: _LookupTarget.bulk,
-                bulkIndex: _activeBulkIndex,
+            if (!isPharmacist)
+              compactAction(
+                onPressed: () => _showAddMedicineDialog(
+                  target: _LookupTarget.bulk,
+                  bulkIndex: _activeBulkIndex,
+                ),
+                icon: Icons.medication_outlined,
+                label: 'Add medicine',
               ),
-              icon: Icons.medication_outlined,
-              label: 'Add medicine',
-            ),
             compactAction(
               onPressed: _addBulkLine,
               icon: Icons.add,

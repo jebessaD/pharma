@@ -184,10 +184,11 @@ class _OrganizationHubPageState extends ConsumerState<OrganizationHubPage>
                     .select('id')
                     .single();
                 final createdBranchId = created['id'] as String?;
+                String copySummary = '';
                 if (duplicateCatalog &&
                     createdBranchId != null &&
                     sourceBranchId != null) {
-                  await Supabase.instance.client.rpc(
+                  final dup = await Supabase.instance.client.rpc(
                     'duplicate_branch_medicines',
                     params: {
                       'p_source_branch_id': sourceBranchId,
@@ -195,10 +196,23 @@ class _OrganizationHubPageState extends ConsumerState<OrganizationHubPage>
                       'p_skip_existing': true,
                     },
                   );
+                  if (dup is Map) {
+                    final copied =
+                        (dup['copied_count'] as num?)?.toInt() ?? 0;
+                    final skipped =
+                        (dup['skipped_count'] as num?)?.toInt() ?? 0;
+                    copySummary =
+                        ' Copied $copied catalog item(s); $skipped skipped (already on target).';
+                  }
                 }
                 if (!sheetContext.mounted) return;
                 ref.invalidate(branchesListProvider(teamId));
-                AppFeedback.success(sheetContext, 'Branch created');
+                AppFeedback.success(
+                  sheetContext,
+                  duplicateCatalog && copySummary.isNotEmpty
+                      ? 'Branch created.$copySummary'
+                      : 'Branch created',
+                );
                 Navigator.of(sheetContext).pop();
               } catch (e) {
                 setSheetState(() => errorText = mapFormError(e));

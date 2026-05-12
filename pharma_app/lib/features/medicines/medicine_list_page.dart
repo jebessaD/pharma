@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
+import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/widgets/app_error_state.dart';
 
@@ -178,6 +179,8 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
   @override
   Widget build(BuildContext context) {
     final categoriesAsync = ref.watch(activeBranchMedicineCategoriesProvider);
+    final gate = ref.watch(pharmacyRedirectCacheProvider);
+    final isPharmacist = gate?.role == 'pharmacist';
     final cs = Theme.of(context).colorScheme;
     final branchId = ref.watch(selectedBranchIdProvider);
     if (_lastBranchId != branchId) {
@@ -189,11 +192,13 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
       });
     }
     return Scaffold(
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openNewMedicine,
-        icon: const Icon(Icons.add),
-        label: const Text('Medicine'),
-      ),
+      floatingActionButton: isPharmacist
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _openNewMedicine,
+              icon: const Icon(Icons.add),
+              label: const Text('Medicine'),
+            ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -217,7 +222,9 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                   const Text('No medicines yet'),
                   const SizedBox(height: 8),
                   Text(
-                    'Add your first medicine with the + button below.',
+                    isPharmacist
+                        ? 'Ask a team owner or admin to add medicines to this branch.'
+                        : 'Add your first medicine with the + button below.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,

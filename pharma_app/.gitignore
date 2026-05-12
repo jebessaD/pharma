@@ -51,3 +51,6 @@ app.*.map.json
 
 # Local compile-time defines (never commit)
 /tool/dart_defines.local.json
+
+# Debug screenshots (e.g. Flutter DevTools)
+flutter_*.png

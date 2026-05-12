@@ -243,7 +243,9 @@ class PharmacyHomePage extends ConsumerWidget {
   static double _childAspectRatio(int gridCross, double layoutWidth) {
     if (gridCross >= 3) return 1.6;
     if (gridCross == 1) return 2.6;
-    return layoutWidth >= 720 ? 1.55 : 1.45;
+    // Slightly shorter aspect ratio => taller cells, avoids _ActionTile overflow
+    // on narrow two-column layouts (~140px wide tiles).
+    return layoutWidth >= 720 ? 1.52 : 1.36;
   }
 
   @override
@@ -875,9 +877,9 @@ class _ActionTile extends StatelessWidget {
         ? cs.outlineVariant.withValues(alpha: 0.35)
         : cs.outlineVariant.withValues(alpha: 0.5);
     final hPad = compact ? 10.0 : 14.0;
-    final vPad = compact ? 8.0 : 10.0;
-    final iconBox = compact ? 40.0 : 48.0;
-    final iconGlyph = compact ? 22.0 : 26.0;
+    final vPad = compact ? 6.0 : 10.0;
+    final iconBox = compact ? 36.0 : 48.0;
+    final iconGlyph = compact ? 20.0 : 26.0;
 
     return Material(
       color: surface,
@@ -896,7 +898,6 @@ class _ActionTile extends StatelessWidget {
           padding: EdgeInsets.fromLTRB(hPad, vPad, hPad - 2, vPad),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(
                 children: [
@@ -937,35 +938,45 @@ class _ActionTile extends StatelessWidget {
                   Icon(
                     Icons.chevron_right_rounded,
                     color: cs.onSurfaceVariant.withValues(alpha: 0.7),
-                    size: compact ? 22 : 26,
+                    size: compact ? 20 : 26,
                   ),
                 ],
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    action.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.2,
-                      fontSize: compact ? 15 : null,
+              Expanded(
+                child: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: FittedBox(
+                    alignment: Alignment.bottomLeft,
+                    fit: BoxFit.scaleDown,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          action.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                            fontSize: compact ? 15 : null,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          action.subtitle,
+                          style: t.textTheme.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                            height: compact ? 1.1 : 1.15,
+                            fontSize: compact ? 11 : null,
+                          ),
+                          maxLines: compact ? 1 : 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 1),
-                  Text(
-                    action.subtitle,
-                    style: t.textTheme.bodySmall?.copyWith(
-                      color: cs.onSurfaceVariant,
-                      height: 1.15,
-                      fontSize: compact ? 11 : null,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+                ),
               ),
             ],
           ),

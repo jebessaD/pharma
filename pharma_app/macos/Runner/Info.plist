@@ -28,5 +28,9 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Pharma Shelf saves receipt images to your photo library when you download a receipt.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Pharma Shelf needs access to save receipt images to your photo library.</string>
 </dict>
 </plist>

@@ -1043,10 +1043,6 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                                           value: 'mobile_banking',
                                           child: Text('Mobile banking'),
                                         ),
-                                        DropdownMenuItem<String>(
-                                          value: 'bank_transfer',
-                                          child: Text('Bank transfer'),
-                                        ),
                                       ],
                                       onChanged: (value) {
                                         setState(

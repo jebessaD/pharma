@@ -4,10 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/utils/refresh_alerts_silent.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
+import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/providers/branch_change_guard_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/widgets/slash_dd_mm_yyyy_input.dart';
@@ -587,6 +589,12 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
         'receive_purchase',
         params: {'p_purchase_id': id},
       );
+      final profile = ref.read(pharmacyProfileProvider).value;
+      final tid = profile?['team_id'] as String?;
+      final bid = ref.read(selectedBranchIdProvider);
+      if (tid != null && bid != null) {
+        await refreshAlertsSilent(teamId: tid, branchId: bid);
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _error = userFacingError(e));
@@ -653,6 +661,8 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     });
 
     final branchId = ref.watch(selectedBranchIdProvider);
+    final isPharmacist = ref.watch(pharmacyRedirectCacheProvider)?.role ==
+        'pharmacist';
     final isEditMode = widget.purchaseId != null;
     final title = isEditMode ? 'Edit draft' : 'New purchase';
     final t = Theme.of(context);
@@ -855,15 +865,17 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
                 },
               ),
               const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  onPressed: _saving ? null : _showAddMedicineDialog,
-                  icon: const Icon(Icons.medication_outlined),
-                  label: const Text('Not found? Add medicine'),
+              if (!isPharmacist)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: _saving ? null : _showAddMedicineDialog,
+                    icon: const Icon(Icons.medication_outlined),
+                    label: const Text('Not found? Add medicine'),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
+              if (!isPharmacist) const SizedBox(height: 16),
+              if (isPharmacist) const SizedBox(height: 8),
               Text(
                 'Batch & dates',
                 style: t.textTheme.labelLarge?.copyWith(

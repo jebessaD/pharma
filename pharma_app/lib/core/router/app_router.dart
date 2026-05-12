@@ -440,6 +440,16 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                 routes: [
                   GoRoute(
                     path: 'new',
+                    redirect: (context, state) async {
+                      final user = Supabase.instance.client.auth.currentUser;
+                      if (user == null) return '/login';
+                      await ref
+                          .read(pharmacyRedirectCacheProvider.notifier)
+                          .hydrate(user.id);
+                      final role = ref.read(pharmacyRedirectCacheProvider)?.role;
+                      if (role == 'pharmacist') return '/pharmacy/medicines';
+                      return null;
+                    },
                     builder: (context, state) => const CreateMedicinePage(),
                   ),
                   GoRoute(
