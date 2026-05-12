@@ -775,9 +775,8 @@ class _PosPageState extends ConsumerState<PosPage> {
     }
   }
 
-  Future<void> _shareOrDownloadReceiptPng(
+  Future<void> _shareReceiptPngFromSheet(
     String saleId, {
-    required bool download,
     required void Function(void Function()) setModalState,
     required void Function(String? message) reportError,
   }) async {
@@ -803,25 +802,10 @@ class _PosPageState extends ConsumerState<PosPage> {
       return;
     }
     try {
-      if (download) {
-        final result = await saveReceiptPngToDevice(saleId, png);
-        if (!mounted) return;
-        if (!result.ok) {
-          reportError('Could not save receipt image.');
-        } else {
-          reportError(null);
-        }
-        showReceiptSaveFeedback(context, saleId, png, result);
-      } else {
-        await shareReceiptPngBytes(saleId, png);
-      }
+      await shareReceiptPngBytes(saleId, png);
     } catch (_) {
       if (!mounted) return;
-      reportError(
-        download
-            ? 'Could not save receipt image.'
-            : 'Could not share receipt image.',
-      );
+      reportError('Could not share receipt image.');
     }
   }
 
@@ -861,25 +845,12 @@ class _PosPageState extends ConsumerState<PosPage> {
                             horizontal: 12,
                             vertical: 10,
                           ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                Icons.check_circle_outline,
-                                size: 20,
-                                color: cs.onPrimaryContainer,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  bannerMsg,
-                                  style: t.textTheme.bodyMedium?.copyWith(
-                                    color: cs.onPrimaryContainer,
-                                    height: 1.35,
-                                  ),
-                                ),
-                              ),
-                            ],
+                          child: Text(
+                            bannerMsg,
+                            style: t.textTheme.bodyMedium?.copyWith(
+                              color: cs.onPrimaryContainer,
+                              height: 1.35,
+                            ),
                           ),
                         ),
                       ),
@@ -887,7 +858,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                     if (!hasBanner) ...[
                       const SizedBox(height: 4),
                       Text(
-                        'View on screen, or share / save as a PNG image.',
+                        'View on screen or share the receipt as a PNG.',
                         style: t.textTheme.bodySmall,
                       ),
                     ],
@@ -913,9 +884,8 @@ class _PosPageState extends ConsumerState<PosPage> {
                     const SizedBox(height: 8),
                     OutlinedButton(
                       onPressed: () async {
-                        await _shareOrDownloadReceiptPng(
+                        await _shareReceiptPngFromSheet(
                           saleId,
-                          download: false,
                           setModalState: setModalState,
                           reportError: (e) {
                             setModalState(() {
@@ -924,23 +894,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                           },
                         );
                       },
-                      child: const Text('Share image'),
-                    ),
-                    const SizedBox(height: 8),
-                    OutlinedButton(
-                      onPressed: () async {
-                        await _shareOrDownloadReceiptPng(
-                          saleId,
-                          download: true,
-                          setModalState: setModalState,
-                          reportError: (e) {
-                            setModalState(() {
-                              sheetError = e;
-                            });
-                          },
-                        );
-                      },
-                      child: const Text('Download (PNG)'),
+                      child: const Text('Share receipt image'),
                     ),
                   ],
                 ),

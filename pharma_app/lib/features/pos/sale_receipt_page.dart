@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
@@ -138,35 +139,25 @@ class _SaleReceiptPageState extends State<SaleReceiptPage> {
 
   Future<void> _share() async {
     final png = _receiptPngBytes;
-    if (png == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not build receipt image.')),
-      );
+    if (png != null) {
+      try {
+        await shareReceiptPngBytes(widget.saleId, png);
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not share receipt image.')),
+        );
+      }
       return;
     }
     try {
-      await shareReceiptPngBytes(widget.saleId, png);
+      await Share.share(_buildReceiptText(), subject: 'Pharmacy receipt');
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not share receipt image.')),
+        const SnackBar(content: Text('Could not share receipt.')),
       );
     }
-  }
-
-  Future<void> _download() async {
-    final png = _receiptPngBytes;
-    if (png == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not build receipt image.')),
-      );
-      return;
-    }
-    final result = await saveReceiptPngToDevice(widget.saleId, png);
-    if (!mounted) return;
-    showReceiptSaveFeedback(context, widget.saleId, png, result);
   }
 
   @override
@@ -175,20 +166,6 @@ class _SaleReceiptPageState extends State<SaleReceiptPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Receipt'),
-        actions: [
-          if (_sale != null && _receiptPngBytes != null) ...[
-            IconButton(
-              tooltip: 'Download',
-              icon: const Icon(Icons.download_outlined),
-              onPressed: _download,
-            ),
-            IconButton(
-              tooltip: 'Share as image',
-              icon: const Icon(Icons.share_outlined),
-              onPressed: _share,
-            ),
-          ],
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -221,24 +198,10 @@ class _SaleReceiptPageState extends State<SaleReceiptPage> {
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 const SizedBox(height: 20),
-                if (_receiptPngBytes != null) ...[
-                  FilledButton.icon(
-                    onPressed: _download,
-                    icon: const Icon(Icons.download),
-                    label: const Text('Download'),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: _share,
-                    icon: const Icon(Icons.share_outlined),
-                    label: const Text('Share as image'),
-                  ),
-                ] else
-                  FilledButton.icon(
-                    onPressed: _share,
-                    icon: const Icon(Icons.share),
-                    label: const Text('Share as image'),
-                  ),
+                FilledButton(
+                  onPressed: _share,
+                  child: const Text('Share receipt'),
+                ),
               ],
             ),
     );
