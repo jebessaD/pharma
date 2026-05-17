@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
+import '../../core/medicine_category_catalog.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/widgets/app_feedback.dart';
@@ -23,7 +24,7 @@ class _EditMedicinePageState extends ConsumerState<EditMedicinePage> {
   final _name = TextEditingController();
   final _code = TextEditingController();
   final _barcode = TextEditingController();
-  String? _categoryId;
+  String _categoryKey = medicineCategoryCatalog.first.key;
   bool _loading = true;
   String? _error;
 
@@ -53,14 +54,17 @@ class _EditMedicinePageState extends ConsumerState<EditMedicinePage> {
       }
       final row = await Supabase.instance.client
           .from('medicines')
-          .select('name, manual_code, barcode, category_id')
+          .select('name, manual_code, barcode, category_key')
           .eq('id', widget.medicineId)
           .eq('branch_id', branchId)
           .single();
       _name.text = row['name'] as String? ?? '';
       _code.text = row['manual_code'] as String? ?? '';
       _barcode.text = row['barcode'] as String? ?? '';
-      _categoryId = row['category_id'] as String?;
+      final rawKey = row['category_key'] as String?;
+      _categoryKey = medicineCategoryCatalog.any((c) => c.key == rawKey)
+          ? rawKey!
+          : medicineCategoryCatalog.last.key;
       setState(() => _loading = false);
     } catch (e) {
       setState(() {
@@ -83,11 +87,11 @@ class _EditMedicinePageState extends ConsumerState<EditMedicinePage> {
           .from('medicines')
           .update({
             'name': _name.text.trim(),
-            'manual_code': _code.text.trim(),
+            'manual_code': _code.text.trim().isEmpty ? null : _code.text.trim(),
             'barcode': _barcode.text.trim().isEmpty
                 ? null
                 : _barcode.text.trim(),
-            'category_id': _categoryId,
+            'category_key': _categoryKey,
           })
           .eq('id', widget.medicineId)
           .eq('branch_id', branchId);
@@ -125,10 +129,9 @@ class _EditMedicinePageState extends ConsumerState<EditMedicinePage> {
                     TextFormField(
                       controller: _code,
                       decoration: const InputDecoration(
-                        labelText: 'Manual code',
+                        labelText: 'Manual code (optional)',
+                        helperText: 'Unique per branch when set',
                       ),
-                      validator: (v) =>
-                          FormValidators.requiredText(v, label: 'Manual code'),
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -138,7 +141,7 @@ class _EditMedicinePageState extends ConsumerState<EditMedicinePage> {
                     const SizedBox(height: 12),
                     categoriesAsync.when(
                       data: (categories) => DropdownButtonFormField<String>(
-                        initialValue: _categoryId,
+                        initialValue: _categoryKey,
                         decoration: const InputDecoration(
                           labelText: 'Category',
                         ),
@@ -155,7 +158,9 @@ class _EditMedicinePageState extends ConsumerState<EditMedicinePage> {
                             )
                             .toList(),
                         onChanged: (value) {
-                          setState(() => _categoryId = value);
+                          if (value != null) {
+                            setState(() => _categoryKey = value);
+                          }
                         },
                         validator: (value) =>
                             value == null ? 'Select a category' : null,

@@ -11,6 +11,10 @@ import '../../core/router/matched_drawer_path.dart';
 import '../../core/shared_preferences_provider.dart';
 import '../../core/providers/platform_messages_provider.dart';
 import '../../core/providers/team_shell_meta_provider.dart';
+import '../../core/providers/youtube_onboarding_provider.dart';
+import '../../core/widgets/youtube_brand_icon.dart';
+import '../onboarding/youtube_onboarding_dialog.dart';
+import '../onboarding/youtube_onboarding_host.dart';
 import '../../core/providers/sync_status_provider.dart';
 import '../../core/widgets/app_error_state.dart';
 import '../../core/widgets/form_error_banner.dart';
@@ -39,6 +43,25 @@ class PharmacyShell extends ConsumerWidget {
   const PharmacyShell({super.key, required this.child});
 
   final Widget child;
+
+  /// Login email for owners; staff `username`, else display name, else email.
+  static String? accountIdentityLine(Map<String, dynamic> profile) {
+    final role = (profile['role'] as String? ?? '').trim().toLowerCase();
+    final auth = Supabase.instance.client.auth.currentUser;
+    final email = (auth?.email ?? '').trim();
+    final username = (profile['username'] as String? ?? '').trim();
+    final fullName = (profile['full_name'] as String? ?? '').trim();
+    if (role == 'owner') {
+      if (email.isNotEmpty) return email;
+      if (username.isNotEmpty) return username;
+      if (fullName.isNotEmpty) return fullName;
+      return null;
+    }
+    if (username.isNotEmpty) return username;
+    if (fullName.isNotEmpty) return fullName;
+    if (email.isNotEmpty) return email;
+    return null;
+  }
 
   static List<_Section> _sectionsForRole(String role) {
     const home = _Dest(
@@ -399,6 +422,11 @@ class PharmacyShell extends ConsumerWidget {
                     ? ''
                     : '${role[0].toUpperCase()}${role.substring(1).toLowerCase()}';
 
+                final accountIdentity =
+                    PharmacyShell.accountIdentityLine(profile);
+                final youtubeOnboarding =
+                    ref.watch(youtubeOnboardingConfigProvider).value;
+
                 final sessionKey =
                     '${profile['id'] as String? ?? ''}_$teamId';
                 return Scaffold(
@@ -420,6 +448,7 @@ class PharmacyShell extends ConsumerWidget {
                             branchTitle: branches.isEmpty ? null : branchTitle,
                             displayName: shellTitle,
                             roleLabel: roleLabel.isEmpty ? null : roleLabel,
+                            accountIdentity: accountIdentity,
                             teamId: teamId,
                             selectedBranchId: selectedBranch,
                             notificationsSelected:
@@ -441,23 +470,53 @@ class PharmacyShell extends ConsumerWidget {
                           ),
                           ...List.generate(sections.length, (si) {
                             final sec = sections[si];
+                            final showHowToUse =
+                                youtubeOnboarding?.isDrawerActive == true;
                             return <Widget>[
                               if (sec.title != null) ...[
                                 if (si > 0) const SizedBox(height: 4),
                                 _DrawerSectionLabel(title: sec.title!),
                               ],
-                              ...sec.dests.map(
-                                (d) => _DrawerNavTile(
-                                  dest: d,
-                                  selected: d.path == matched,
-                                  onTap: () {
-                                    HapticFeedback.selectionClick();
-                                    Navigator.of(context).pop();
-                                    if (d.path == path) return;
-                                    context.go(d.path);
-                                  },
-                                ),
-                              ),
+                              ...sec.dests.expand((d) {
+                                final tiles = <Widget>[
+                                  _DrawerNavTile(
+                                    dest: d,
+                                    selected: d.path == matched,
+                                    onTap: () {
+                                      HapticFeedback.selectionClick();
+                                      Navigator.of(context).pop();
+                                      if (d.path == path) return;
+                                      context.go(d.path);
+                                    },
+                                  ),
+                                ];
+                                if (d.path == '/pharmacy/contact' &&
+                                    showHowToUse) {
+                                  tiles.add(
+                                    _DrawerNavTile(
+                                      dest: const _Dest(
+                                        path: '',
+                                        label: 'How to use',
+                                        icon: Icons
+                                            .play_circle_outline_rounded,
+                                      ),
+                                      leading: const YoutubeBrandIcon(
+                                        size: 26,
+                                      ),
+                                      selected: false,
+                                      onTap: () {
+                                        HapticFeedback.selectionClick();
+                                        Navigator.of(context).pop();
+                                        openYoutubeTutorial(
+                                          context,
+                                          url: youtubeOnboarding!.url,
+                                        );
+                                      },
+                                    ),
+                                  );
+                                }
+                                return tiles;
+                              }),
                             ];
                           }).expand((w) => w),
                           Padding(
@@ -691,7 +750,9 @@ class PharmacyShell extends ConsumerWidget {
                               ),
                             ],
                           ),
-                        Expanded(child: child),
+                        Expanded(
+                          child: YoutubeOnboardingHost(child: child),
+                        ),
                       ],
                     ),
                   ),
@@ -726,6 +787,7 @@ class _DrawerHeader extends ConsumerWidget {
     super.key,
     this.displayName,
     this.roleLabel,
+    this.accountIdentity,
     this.branchTitle,
     required this.teamId,
     required this.selectedBranchId,
@@ -737,6 +799,7 @@ class _DrawerHeader extends ConsumerWidget {
 
   final String? displayName;
   final String? roleLabel;
+  final String? accountIdentity;
   final String? branchTitle;
   final String teamId;
   final String? selectedBranchId;
@@ -902,18 +965,6 @@ class _DrawerHeader extends ConsumerWidget {
               letterSpacing: -0.3,
             ),
           ),
-          if (showProfileName) ...[
-            const SizedBox(height: 4),
-            Text(
-              'Pharmacy',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: t.textTheme.titleSmall?.copyWith(
-                color: cs.onPrimaryContainer,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
           if (roleLabel != null) ...[
             const SizedBox(height: 8),
             DecoratedBox(
@@ -934,6 +985,32 @@ class _DrawerHeader extends ConsumerWidget {
                   ),
                 ),
               ),
+            ),
+          ],
+          if ((accountIdentity ?? '').trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.account_circle_outlined,
+                  size: 18,
+                  color: cs.onPrimaryContainer.withValues(alpha: 0.88),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    accountIdentity!.trim(),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.textTheme.bodySmall?.copyWith(
+                      color: cs.onPrimaryContainer.withValues(alpha: 0.95),
+                      fontWeight: FontWeight.w600,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
           if (branchTitle != null) ...[
@@ -1012,12 +1089,14 @@ class _DrawerNavTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.tone = _DrawerTileTone.normal,
+    this.leading,
   });
 
   final _Dest dest;
   final bool selected;
   final VoidCallback onTap;
   final _DrawerTileTone tone;
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context) {
@@ -1055,7 +1134,9 @@ class _DrawerNavTile extends StatelessWidget {
                     color: iconBg,
                     borderRadius: BorderRadius.circular(11),
                   ),
-                  child: Icon(dest.icon, size: 22, color: iconFg),
+                  alignment: Alignment.center,
+                  child: leading ??
+                      Icon(dest.icon, size: 22, color: iconFg),
                 ),
                 const SizedBox(width: 14),
                 Expanded(

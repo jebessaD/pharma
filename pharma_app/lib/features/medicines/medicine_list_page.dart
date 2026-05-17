@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/medicine_category_catalog.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
@@ -23,7 +24,7 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
   List<Map<String, dynamic>> _rows = [];
   String _query = '';
 
-  final Set<String> _selectedCategoryIds = <String>{};
+  final Set<String> _selectedCategoryKeys = <String>{};
   String? _lastBranchId;
 
   @override
@@ -77,7 +78,7 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
       final data = await Supabase.instance.client
           .from('medicines')
           .select(
-            'id, name, generic_name, manual_code, category_id, medicine_categories(name)',
+            'id, name, generic_name, manual_code, category_key',
           )
           .eq('team_id', teamId)
           .eq('branch_id', branchId)
@@ -100,7 +101,7 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
       context: context,
       isScrollControlled: true,
       builder: (ctx) {
-        final temp = Set<String>.from(_selectedCategoryIds);
+        final temp = Set<String>.from(_selectedCategoryKeys);
         return StatefulBuilder(
           builder: (context, setModalState) {
             final maxH = MediaQuery.sizeOf(context).height * 0.55;
@@ -169,7 +170,7 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
     );
     if (result != null && mounted) {
       setState(() {
-        _selectedCategoryIds
+        _selectedCategoryKeys
           ..clear()
           ..addAll(result);
       });
@@ -187,7 +188,7 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
       _lastBranchId = branchId;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        setState(_selectedCategoryIds.clear);
+        setState(_selectedCategoryKeys.clear);
         _load();
       });
     }
@@ -241,18 +242,17 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                       .where((m) {
                         if (_query.trim().isEmpty) return true;
                         final q = _query.trim().toLowerCase();
-                        final category =
-                            (m['medicine_categories']
-                                as Map<String, dynamic>?)?['name'] ??
-                            '';
+                        final category = medicineCategoryLabel(
+                          m['category_key'] as String?,
+                        );
                         return ('${m['name'] ?? ''} ${m['manual_code'] ?? ''} ${m['generic_name'] ?? ''} $category')
                             .toLowerCase()
                             .contains(q);
                       })
                       .where((m) {
-                        if (_selectedCategoryIds.isEmpty) return true;
-                        final id = m['category_id'] as String?;
-                        return id != null && _selectedCategoryIds.contains(id);
+                        if (_selectedCategoryKeys.isEmpty) return true;
+                        final key = m['category_key'] as String?;
+                        return key != null && _selectedCategoryKeys.contains(key);
                       })
                       .toList();
                   return CustomScrollView(
@@ -307,9 +307,9 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                                     ),
                                     title: const Text('Medicine categories'),
                                     subtitle: Text(
-                                      _selectedCategoryIds.isEmpty
+                                      _selectedCategoryKeys.isEmpty
                                           ? 'All categories'
-                                          : '${_selectedCategoryIds.length} selected',
+                                          : '${_selectedCategoryKeys.length} selected',
                                     ),
                                     trailing: const Icon(
                                       Icons.checklist_rounded,
@@ -354,9 +354,9 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                             itemBuilder: (context, i) {
                               final m = filtered[i];
                               final id = m['id'] as String;
-                              final category =
-                                  (m['medicine_categories']
-                                      as Map<String, dynamic>?)?['name'];
+                              final category = medicineCategoryLabel(
+                                m['category_key'] as String?,
+                              );
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 8),
                                 elevation: 0,
@@ -384,7 +384,7 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                                   trailing: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      if ((category as String?)?.isNotEmpty == true)
+                                      if (category.isNotEmpty)
                                         Container(
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 8,
@@ -395,7 +395,7 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                                             borderRadius: BorderRadius.circular(999),
                                           ),
                                           child: Text(
-                                            category!,
+                                            category,
                                             style: TextStyle(
                                               fontSize: 11,
                                               color: cs.onSecondaryContainer,

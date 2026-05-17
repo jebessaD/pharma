@@ -28,7 +28,7 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
   /// `null` = all movement types (matches DB `stock_movements.movement_type`).
   String? _selectedMovementType;
   Timer? _debounce;
-  final Set<String> _selectedCategoryIds = <String>{};
+  final Set<String> _selectedCategoryKeys = <String>{};
 
   DateTime _from = DateTime.now().subtract(const Duration(days: 14));
   DateTime _to = DateTime.now();
@@ -120,16 +120,16 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
           .from('stock_movements')
           .select(
             'created_at, movement_type, qty_change_base_unit, reason, reference_type, '
-            'medicine_batches(batch_no, medicines(name, category_id))',
+            'medicine_batches(batch_no, medicines(name, category_key))',
           )
           .eq('team_id', teamId)
           .eq('branch_id', branchId)
           .gte('created_at', fromDt.toIso8601String())
           .lt('created_at', toExclusive.toIso8601String());
-      if (_selectedCategoryIds.isNotEmpty) {
+      if (_selectedCategoryKeys.isNotEmpty) {
         q = q.inFilter(
-          'medicine_batches.medicines.category_id',
-          _selectedCategoryIds.toList(growable: false),
+          'medicine_batches.medicines.category_key',
+          _selectedCategoryKeys.toList(growable: false),
         );
       }
       final data = await q.order('created_at', ascending: false).limit(800);
@@ -286,19 +286,19 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
                         contentPadding: EdgeInsets.zero,
                         title: const Text('Categories'),
                         subtitle: Text(
-                          _selectedCategoryIds.isEmpty
+                          _selectedCategoryKeys.isEmpty
                               ? 'All categories'
-                              : '${_selectedCategoryIds.length} selected',
+                              : '${_selectedCategoryKeys.length} selected',
                         ),
                         trailing: const Icon(Icons.checklist_rounded),
                         onTap: () async {
                           final selected = await _pickCategoryIds(
                             categoryOptions,
-                            _selectedCategoryIds,
+                            _selectedCategoryKeys,
                           );
                           if (selected == null) return;
                           setState(() {
-                            _selectedCategoryIds
+                            _selectedCategoryKeys
                               ..clear()
                               ..addAll(selected);
                           });

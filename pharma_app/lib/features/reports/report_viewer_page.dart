@@ -75,7 +75,7 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
   final TextEditingController _maxAmountCtl = TextEditingController();
   String? _selectedSellerId;
   String? _selectedPaymentMethod;
-  final Set<String> _selectedCategoryIds = <String>{};
+  final Set<String> _selectedCategoryKeys = <String>{};
   bool _overridesOnly = false;
   bool _filtersExpanded = false;
   List<Map<String, String>> _sellerOptions = const [];
@@ -344,9 +344,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
             'p_max_amount': maxAmount,
             'p_payment_method': _selectedPaymentMethod,
             'p_overrides_only': _overridesOnly,
-            'p_category_ids': _selectedCategoryIds.isEmpty
+            'p_category_keys': _selectedCategoryKeys.isEmpty
                 ? null
-                : _selectedCategoryIds.toList(growable: false),
+                : _selectedCategoryKeys.toList(growable: false),
           },
         );
         _rows = List<Map<String, dynamic>>.from(data as List);
@@ -368,9 +368,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                 'p_max_amount': null,
                 'p_payment_method': null,
                 'p_overrides_only': false,
-                'p_category_ids': _selectedCategoryIds.isEmpty
+                'p_category_keys': _selectedCategoryKeys.isEmpty
                     ? null
-                    : _selectedCategoryIds.toList(growable: false),
+                    : _selectedCategoryKeys.toList(growable: false),
               },
             );
             final raw =
@@ -407,9 +407,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                 'p_max_amount': null,
                 'p_payment_method': null,
                 'p_overrides_only': false,
-                'p_category_ids': _selectedCategoryIds.isEmpty
+                'p_category_keys': _selectedCategoryKeys.isEmpty
                     ? null
-                    : _selectedCategoryIds.toList(growable: false),
+                    : _selectedCategoryKeys.toList(growable: false),
               },
             );
             final raw =
@@ -468,9 +468,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
         final data = await _rpcWithOptionalCategory('rpc_report_stock_balance', {
           'p_team_id': teamId,
           'p_branch_id': branchId,
-          'p_category_ids': _selectedCategoryIds.isEmpty
+          'p_category_keys': _selectedCategoryKeys.isEmpty
               ? null
-              : _selectedCategoryIds.toList(growable: false),
+              : _selectedCategoryKeys.toList(growable: false),
         });
         _rows = List<Map<String, dynamic>>.from(data as List);
       } else if (t == 'expiry_status') {
@@ -479,9 +479,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
           'p_team_id': teamId,
           'p_branch_id': branchId,
           'p_threshold_days': thresholdDays,
-          'p_category_ids': _selectedCategoryIds.isEmpty
+          'p_category_keys': _selectedCategoryKeys.isEmpty
               ? null
-              : _selectedCategoryIds.toList(growable: false),
+              : _selectedCategoryKeys.toList(growable: false),
         });
         _rows = List<Map<String, dynamic>>.from(data as List);
       } else {
@@ -507,18 +507,7 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
     String functionName,
     Map<String, dynamic> params,
   ) async {
-    try {
-      return await Supabase.instance.client.rpc(functionName, params: params);
-    } on PostgrestException catch (e) {
-      final text = '${e.message} ${e.details ?? ''} ${e.hint ?? ''}'
-          .toLowerCase();
-      final expectsOldSignature =
-          text.contains('p_category_ids') || text.contains('function');
-      if (!expectsOldSignature || _selectedCategoryIds.isNotEmpty) rethrow;
-      final legacyParams = Map<String, dynamic>.from(params)
-        ..remove('p_category_ids');
-      return Supabase.instance.client.rpc(functionName, params: legacyParams);
-    }
+    return Supabase.instance.client.rpc(functionName, params: params);
   }
 
   Future<void> _exportCsv() async {
@@ -1106,19 +1095,19 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                             contentPadding: EdgeInsets.zero,
                             title: const Text('Medicine categories'),
                             subtitle: Text(
-                              _selectedCategoryIds.isEmpty
+                              _selectedCategoryKeys.isEmpty
                                   ? 'All categories'
-                                  : '${_selectedCategoryIds.length} selected',
+                                  : '${_selectedCategoryKeys.length} selected',
                             ),
                             trailing: const Icon(Icons.checklist_rounded),
                             onTap: () async {
                               final selected = await _pickCategoryIds(
                                 categoryOptions,
-                                _selectedCategoryIds,
+                                _selectedCategoryKeys,
                               );
                               if (selected == null) return;
                               setState(() {
-                                _selectedCategoryIds
+                                _selectedCategoryKeys
                                   ..clear()
                                   ..addAll(selected);
                               });

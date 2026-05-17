@@ -137,6 +137,20 @@ class _SaleReceiptPageState extends State<SaleReceiptPage> {
     );
   }
 
+  Future<void> _download() async {
+    final png = _receiptPngBytes;
+    if (png == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Receipt image is not ready yet.')),
+      );
+      return;
+    }
+    final result = await saveReceiptPngToDevice(widget.saleId, png);
+    if (!mounted) return;
+    showReceiptSaveFeedback(context, widget.saleId, png, result);
+  }
+
   Future<void> _share() async {
     final png = _receiptPngBytes;
     if (png != null) {
@@ -175,7 +189,10 @@ class _SaleReceiptPageState extends State<SaleReceiptPage> {
           ? const Center(child: Text('Nothing to show'))
           : _imageBuilding && _receiptPngBytes == null
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               children: [
                 if (_receiptPngBytes != null)
@@ -199,10 +216,16 @@ class _SaleReceiptPageState extends State<SaleReceiptPage> {
                   ),
                 const SizedBox(height: 20),
                 FilledButton(
+                  onPressed: _download,
+                  child: const Text('Download receipt'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton(
                   onPressed: _share,
                   child: const Text('Share receipt'),
                 ),
               ],
+            ),
             ),
     );
   }

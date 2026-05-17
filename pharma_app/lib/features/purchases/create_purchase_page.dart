@@ -489,8 +489,7 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     }
     if (categories.isEmpty) {
       setState(
-        () => _error =
-            'Create at least one category before adding medicine.',
+        () => _error = 'Category list is unavailable. Please retry.',
       );
       return;
     }
@@ -1102,7 +1101,7 @@ class _AddMedicineFromPurchaseDialogState
   late final TextEditingController _generic;
   late final TextEditingController _code;
   late final TextEditingController _barcode;
-  late String _categoryId;
+  late String _categoryKey;
   bool _saving = false;
   String? _dialogError;
 
@@ -1113,7 +1112,7 @@ class _AddMedicineFromPurchaseDialogState
     _generic = TextEditingController();
     _code = TextEditingController();
     _barcode = TextEditingController();
-    _categoryId = widget.categories.first['id'] as String;
+    _categoryKey = widget.categories.first['id'] as String;
   }
 
   @override
@@ -1132,6 +1131,7 @@ class _AddMedicineFromPurchaseDialogState
       _dialogError = null;
     });
     try {
+      final codeRaw = _code.text.trim();
       final inserted = await Supabase.instance.client.from('medicines').insert({
         'team_id': widget.teamId,
         'branch_id': widget.branchId,
@@ -1139,9 +1139,9 @@ class _AddMedicineFromPurchaseDialogState
         'generic_name': _generic.text.trim().isEmpty
             ? null
             : _generic.text.trim(),
-        'manual_code': _code.text.trim(),
+        'manual_code': codeRaw.isEmpty ? null : codeRaw,
         'barcode': _barcode.text.trim().isEmpty ? null : _barcode.text.trim(),
-        'category_id': _categoryId,
+        'category_key': _categoryKey,
         'purchase_price': 0,
         'selling_price': 0,
       }).select('id, name, manual_code, barcode, generic_name').single();
@@ -1185,10 +1185,9 @@ class _AddMedicineFromPurchaseDialogState
                 TextFormField(
                   controller: _code,
                   decoration: const InputDecoration(
-                    labelText: 'Manual code (unique)',
+                    labelText: 'Manual code (optional)',
+                    helperText: 'Unique per branch when set',
                   ),
-                  validator: (v) =>
-                      FormValidators.requiredText(v, label: 'Manual code'),
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
@@ -1199,8 +1198,8 @@ class _AddMedicineFromPurchaseDialogState
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  key: ValueKey(_categoryId),
-                  initialValue: _categoryId,
+                  key: ValueKey(_categoryKey),
+                  initialValue: _categoryKey,
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: widget.categories
                       .map(
@@ -1214,7 +1213,7 @@ class _AddMedicineFromPurchaseDialogState
                       ? null
                       : (value) {
                           if (value != null) {
-                            setState(() => _categoryId = value);
+                            setState(() => _categoryKey = value);
                           }
                         },
                   validator: (value) =>

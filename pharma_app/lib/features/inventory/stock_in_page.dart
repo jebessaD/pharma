@@ -475,7 +475,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
     }
     if (categories.isEmpty) {
       setState(
-        () => _error = 'Create at least one category before adding medicine.',
+        () => _error = 'Category list is unavailable. Please retry.',
       );
       return;
     }
@@ -486,7 +486,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
     final generic = TextEditingController();
     final code = TextEditingController();
     final barcode = TextEditingController();
-    String? categoryId = categories.first['id'] as String?;
+    String categoryKey = categories.first['id'] as String;
     var saving = false;
     String? dialogError;
 
@@ -522,11 +522,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
                         TextFormField(
                           controller: code,
                           decoration: const InputDecoration(
-                            labelText: 'Manual code (unique)',
-                          ),
-                          validator: (v) => FormValidators.requiredText(
-                            v,
-                            label: 'Manual code',
+                            labelText: 'Manual code (optional)',
+                            helperText: 'Unique per branch when set',
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -538,7 +535,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
                         ),
                         const SizedBox(height: 10),
                         DropdownButtonFormField<String>(
-                          initialValue: categoryId,
+                          initialValue: categoryKey,
                           decoration: const InputDecoration(
                             labelText: 'Category',
                           ),
@@ -552,10 +549,15 @@ class _StockInPageState extends ConsumerState<StockInPage>
                               .toList(),
                           onChanged: saving
                               ? null
-                              : (value) =>
-                                    setDialogState(() => categoryId = value),
+                              : (value) {
+                                    if (value != null) {
+                                      setDialogState(() => categoryKey = value);
+                                    }
+                                  },
                           validator: (value) =>
-                              value == null ? 'Select a category' : null,
+                              value == null || value.isEmpty
+                                  ? 'Select a category'
+                                  : null,
                         ),
                         if (dialogError != null) ...[
                           const SizedBox(height: 10),
@@ -599,11 +601,13 @@ class _StockInPageState extends ConsumerState<StockInPage>
                                   'generic_name': generic.text.trim().isEmpty
                                       ? null
                                       : generic.text.trim(),
-                                  'manual_code': code.text.trim(),
+                                  'manual_code': code.text.trim().isEmpty
+                                      ? null
+                                      : code.text.trim(),
                                   'barcode': barcode.text.trim().isEmpty
                                       ? null
                                       : barcode.text.trim(),
-                                  'category_id': categoryId,
+                                  'category_key': categoryKey,
                                   'purchase_price': 0,
                                   'selling_price': 0,
                                 })

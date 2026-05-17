@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/platform_messages_provider.dart';
+import '../../core/providers/team_shell_meta_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/widgets/app_error_state.dart';
 import '../../core/widgets/form_error_banner.dart';
@@ -392,11 +393,24 @@ class PharmacyHomePage extends ConsumerWidget {
                 );
               }
 
-              return CustomScrollView(
-                physics: const BouncingScrollPhysics(
-                  parent: AlwaysScrollableScrollPhysics(),
+              Future<void> onRefresh() async {
+                final teamId = p['team_id'] as String?;
+                ref.invalidate(pharmacyProfileProvider);
+                if (teamId != null && teamId.isNotEmpty) {
+                  ref.invalidate(teamShellMetaProvider(teamId));
+                }
+                ref.invalidate(platformOpsProvider);
+                await ref.read(pharmacyProfileProvider.future);
+              }
+
+              return RefreshIndicator(
+                onRefresh: onRefresh,
+                child: CustomScrollView(
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  ),
+                  slivers: slivers,
                 ),
-                slivers: slivers,
               );
             },
           ),

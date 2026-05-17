@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
+import '../../core/medicine_category_catalog.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
@@ -28,7 +29,7 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
   final _code = TextEditingController();
   final _barcode = TextEditingController();
   final _reorder = TextEditingController(text: '0');
-  String? _categoryId;
+  String _categoryKey = medicineCategoryCatalog.first.key;
   bool _loading = false;
   String? _error;
 
@@ -72,7 +73,7 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
       return;
     }
     final name = _name.text.trim();
-    final code = _code.text.trim();
+    final codeRaw = _code.text.trim();
     setState(() {
       _loading = true;
       _error = null;
@@ -85,9 +86,9 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
         'generic_name': _generic.text.trim().isEmpty
             ? null
             : _generic.text.trim(),
-        'manual_code': code,
+        'manual_code': codeRaw.isEmpty ? null : codeRaw,
         'barcode': _barcode.text.trim().isEmpty ? null : _barcode.text.trim(),
-        'category_id': _categoryId,
+        'category_key': _categoryKey,
         'purchase_price': 0,
         'selling_price': 0,
         'reorder_level': num.tryParse(_reorder.text) ?? 0,
@@ -123,9 +124,7 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
             const SizedBox(height: 12),
             AppTextFormField(
               controller: _code,
-              label: 'Manual code (unique)',
-              validator: (v) =>
-                  FormValidators.requiredText(v, label: 'Manual code'),
+              label: 'Manual code (optional)',
             ),
             const SizedBox(height: 12),
             TextFormField(
@@ -143,7 +142,7 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
             const SizedBox(height: 12),
             categoriesAsync.when(
               data: (categories) => DropdownButtonFormField<String>(
-                initialValue: _categoryId,
+                initialValue: _categoryKey,
                 decoration: const InputDecoration(labelText: 'Category'),
                 items: categories
                     .map(
@@ -155,9 +154,13 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
                     .toList(),
                 onChanged: _loading
                     ? null
-                    : (value) => setState(() => _categoryId = value),
+                    : (value) {
+                        if (value != null) {
+                          setState(() => _categoryKey = value);
+                        }
+                      },
                 validator: (value) =>
-                    value == null ? 'Select a category' : null,
+                    value == null || value.isEmpty ? 'Select a category' : null,
               ),
               loading: () => const LinearProgressIndicator(),
               error: (error, stackTrace) => const Text(

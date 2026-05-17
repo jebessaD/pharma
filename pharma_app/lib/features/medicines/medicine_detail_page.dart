@@ -157,11 +157,12 @@ class _MedicineDetailPageState extends ConsumerState<MedicineDetailPage> {
     }
     setState(() => _savingCore = true);
     try {
+      final codeRaw = _manualCodeCtl.text.trim();
       await Supabase.instance.client
           .from('medicines')
           .update({
             'name': _nameCtl.text.trim(),
-            'manual_code': _manualCodeCtl.text.trim(),
+            'manual_code': codeRaw.isEmpty ? null : codeRaw,
             'generic_name': _genericCtl.text.trim().isEmpty
                 ? null
                 : _genericCtl.text.trim(),
@@ -372,10 +373,10 @@ class _MedicineDetailPageState extends ConsumerState<MedicineDetailPage> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _manualCodeCtl,
-                  decoration: const InputDecoration(labelText: 'Manual code'),
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Manual code is required'
-                      : null,
+                  decoration: const InputDecoration(
+                    labelText: 'Manual code (optional)',
+                    helperText: 'Unique per branch when set',
+                  ),
                 ),
                 const SizedBox(height: 8),
                 TextFormField(

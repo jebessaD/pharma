@@ -130,6 +130,7 @@ class _PosPageState extends ConsumerState<PosPage> {
   Timer? _searchDebounce;
   final LayerLink _posSearchLayerLink = LayerLink();
   final ScrollController _cartScrollController = ScrollController();
+  final Set<String> _pickingMedicineIds = {};
 
   Future<void> _refreshSearchMatches() async {
     final raw = _searchCtl.text.trim();
@@ -413,6 +414,40 @@ class _PosPageState extends ConsumerState<PosPage> {
     return preferred;
   }
 
+  void _dismissPosSearch() {
+    _searchCtl.clear();
+    _searchMatches = const [];
+  }
+
+  bool _incrementExistingCartLine(String medicineId) {
+    for (var i = 0; i < _lines.length; i++) {
+      if (_lines[i].medicineId != medicineId) continue;
+      final line = _lines[i];
+      final maxB = line.maxQtyBase();
+      final prev = line.qtyBase;
+      final next = (prev + 1).clamp(1, maxB);
+      setState(() {
+        line.qtyBase = next;
+        line.qtyController.text = _posQtyDisplay(next);
+        _selectedLineIndex = i;
+        _error = null;
+        _dismissPosSearch();
+      });
+      _syncDirtyState();
+      if (next <= prev && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Quantity capped at on-hand stock ($maxB).',
+            ),
+          ),
+        );
+      }
+      return true;
+    }
+    return false;
+  }
+
   Future<void> _pickMedicine(Map<String, dynamic> medicine) async {
     final profile = ref.read(pharmacyProfileProvider).value;
     final teamId = profile?['team_id'] as String?;
@@ -423,16 +458,29 @@ class _PosPageState extends ConsumerState<PosPage> {
     }
     final online = ref.read(connectivityProvider).value ?? true;
     final mid = medicine['id'] as String;
-    for (final line in _lines) {
-      if (line.medicineId == mid) {
-        setState(() {
-          line.qtyBase += 1;
-          _error = null;
-        });
-        _syncDirtyState();
-        return;
-      }
+    if (_incrementExistingCartLine(mid)) return;
+    if (_pickingMedicineIds.contains(mid)) return;
+    _pickingMedicineIds.add(mid);
+    try {
+      await _addNewCartLineForMedicine(
+        medicine,
+        teamId: teamId,
+        branchId: branchId,
+        online: online,
+        medicineId: mid,
+      );
+    } finally {
+      _pickingMedicineIds.remove(mid);
     }
+  }
+
+  Future<void> _addNewCartLineForMedicine(
+    Map<String, dynamic> medicine, {
+    required String teamId,
+    required String branchId,
+    required bool online,
+    required String medicineId,
+  }) async {
     final sell = (medicine['selling_price'] as num?) ?? 0;
     List<Map<String, dynamic>> withQty;
     if (!online) {
@@ -450,7 +498,7 @@ class _PosPageState extends ConsumerState<PosPage> {
         );
         return;
       }
-      withQty = snap.batchesWithQtyForMedicine(mid);
+      withQty = snap.batchesWithQtyForMedicine(medicineId);
       if (withQty.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -461,16 +509,16 @@ class _PosPageState extends ConsumerState<PosPage> {
       }
     } else {
       final batches =
-          _batchCache[mid] ??
+          _batchCache[medicineId] ??
           List<Map<String, dynamic>>.from(
             await Supabase.instance.client
                 .from('medicine_batches')
                 .select('id, batch_no, expiry_date, sell_price_base')
-                .eq('medicine_id', mid)
+                .eq('medicine_id', medicineId)
                 .eq('branch_id', branchId)
                 .order('expiry_date'),
           );
-      _batchCache[mid] = batches;
+      _batchCache[medicineId] = batches;
       final batchRows = List<Map<String, dynamic>>.from(batches as List);
       if (batchRows.isEmpty) {
         if (mounted) {
@@ -540,8 +588,10 @@ class _PosPageState extends ConsumerState<PosPage> {
       return;
     }
 
+    if (_incrementExistingCartLine(medicineId)) return;
+
     final line = _PosCartLine(
-      medicineId: mid,
+      medicineId: medicineId,
       medicineName: medicine['name'] as String? ?? 'Medicine',
       manualCode: medicine['manual_code'] as String? ?? '',
       listPricePerBase: sell,
@@ -552,9 +602,9 @@ class _PosPageState extends ConsumerState<PosPage> {
 
     setState(() {
       _lines.add(line);
+      _selectedLineIndex = _lines.length - 1;
       _error = null;
-      _searchCtl.clear();
-      _searchMatches = const [];
+      _dismissPosSearch();
     });
     _syncDirtyState();
   }
@@ -775,9 +825,8 @@ class _PosPageState extends ConsumerState<PosPage> {
     }
   }
 
-  Future<void> _shareReceiptPngFromSheet(
+  Future<Uint8List?> _buildReceiptPngForSale(
     String saleId, {
-    required void Function(void Function()) setModalState,
     required void Function(String? message) reportError,
   }) async {
     reportError(null);
@@ -785,28 +834,44 @@ class _PosPageState extends ConsumerState<PosPage> {
       Supabase.instance.client,
       saleId,
     );
-    if (!mounted) return;
+    if (!mounted) return null;
     if (text == null) {
       reportError('Could not load receipt.');
-      return;
+      return null;
     }
-    Uint8List? png;
     try {
-      png = await buildReceiptPngBytes(text);
+      return await buildReceiptPngBytes(text);
     } catch (_) {
-      png = null;
-    }
-    if (!mounted) return;
-    if (png == null) {
+      if (!mounted) return null;
       reportError('Could not build receipt image.');
-      return;
+      return null;
     }
+  }
+
+  Future<void> _shareReceiptPngFromSheet(
+    String saleId, {
+    required void Function(void Function()) setModalState,
+    required void Function(String? message) reportError,
+  }) async {
+    final png = await _buildReceiptPngForSale(saleId, reportError: reportError);
+    if (!mounted || png == null) return;
     try {
       await shareReceiptPngBytes(saleId, png);
     } catch (_) {
       if (!mounted) return;
       reportError('Could not share receipt image.');
     }
+  }
+
+  Future<void> _downloadReceiptPngFromSheet(
+    String saleId, {
+    required void Function(String? message) reportError,
+  }) async {
+    final png = await _buildReceiptPngForSale(saleId, reportError: reportError);
+    if (!mounted || png == null) return;
+    final result = await saveReceiptPngToDevice(saleId, png);
+    if (!mounted) return;
+    showReceiptSaveFeedback(context, saleId, png, result);
   }
 
   Future<void> _showPostSaleReceiptSheet({
@@ -880,6 +945,20 @@ class _PosPageState extends ConsumerState<PosPage> {
                         context.push('/pharmacy/receipt/$saleId');
                       },
                       child: const Text('View receipt'),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: () async {
+                        await _downloadReceiptPngFromSheet(
+                          saleId,
+                          reportError: (e) {
+                            setModalState(() {
+                              sheetError = e;
+                            });
+                          },
+                        );
+                      },
+                      child: const Text('Download receipt'),
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton(

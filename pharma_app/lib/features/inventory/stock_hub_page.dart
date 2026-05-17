@@ -108,7 +108,7 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
   String _query = '';
   bool _sortByQtyDesc = true;
   bool _isNavigating = false;
-  final Set<String> _categoryFilterIds = <String>{};
+  final Set<String> _categoryFilterKeys = <String>{};
   String? _adjustingBatchId;
 
   List<Map<String, dynamic>> get _displayRows {
@@ -123,12 +123,12 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
         return name.contains(q) || batch.contains(q);
       }).toList();
     }
-    if (_categoryFilterIds.isNotEmpty) {
+    if (_categoryFilterKeys.isNotEmpty) {
       rows = rows.where((r) {
         final mb = r['medicine_batches'] as Map<String, dynamic>?;
         final med = mb?['medicines'] as Map<String, dynamic>?;
-        final categoryId = (med?['category_id'] as String? ?? '').trim();
-        return _categoryFilterIds.contains(categoryId);
+        final categoryKey = (med?['category_key'] as String? ?? '').trim();
+        return _categoryFilterKeys.contains(categoryKey);
       }).toList();
     }
     rows.sort((a, b) {
@@ -211,7 +211,7 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
       final data = await Supabase.instance.client
           .from('stock_balances')
           .select(
-            'qty_base_unit, medicine_batches(id, batch_no, expiry_date, medicines(name, category_id, medicine_categories(name)))',
+            'qty_base_unit, medicine_batches(id, batch_no, expiry_date, medicines(name, category_key))',
           )
           .eq('team_id', teamId)
           .eq('branch_id', branchId);
@@ -569,19 +569,19 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                                     contentPadding: EdgeInsets.zero,
                                     title: const Text('Categories'),
                                     subtitle: Text(
-                                      _categoryFilterIds.isEmpty
+                                      _categoryFilterKeys.isEmpty
                                           ? 'All categories'
-                                          : '${_categoryFilterIds.length} selected',
+                                          : '${_categoryFilterKeys.length} selected',
                                     ),
                                     trailing: const Icon(Icons.checklist_rounded),
                                     onTap: () async {
                                       final selected = await _pickCategoryIds(
                                         categoryOptions,
-                                        _categoryFilterIds,
+                                        _categoryFilterKeys,
                                       );
                                       if (selected == null) return;
                                       setState(() {
-                                        _categoryFilterIds
+                                        _categoryFilterKeys
                                           ..clear()
                                           ..addAll(selected);
                                       });

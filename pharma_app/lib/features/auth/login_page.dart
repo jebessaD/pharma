@@ -150,20 +150,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
       await persistLocalAuthMarker(ref.read(sharedPreferencesProvider), user);
 
-      // Platform admin check.
-      final adminRow = await Supabase.instance.client
-          .from('platform_admins')
-          .select('id')
-          .eq('auth_user_id', user.id)
-          .eq('is_active', true)
-          .maybeSingle();
-      if (!mounted) return;
-      if (adminRow != null) {
-        didNavigate = true;
-        context.go('/admin/teams');
-        return;
-      }
-
       ref.invalidate(pharmacyProfileProvider);
       final profile = await ref.read(pharmacyProfileProvider.future);
       if (!mounted) return;

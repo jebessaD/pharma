@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/forms/form_error_mapper.dart' show userFacingError, mapFormError;
 import '../../core/forms/form_validators.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
+import '../../core/providers/team_shell_meta_provider.dart';
 import '../../core/widgets/app_feedback.dart';
 import '../../core/widgets/app_text_form_field.dart';
 import '../../core/widgets/form_error_banner.dart';
@@ -103,6 +104,7 @@ class _TeamProfilePageState extends ConsumerState<TeamProfilePage> {
             .update(update)
             .eq('id', _profileRowId!);
       }
+      ref.invalidate(teamShellMetaProvider(teamId));
       await _load(teamId);
       if (mounted) {
         AppFeedback.success(context, 'Saved');
@@ -119,7 +121,17 @@ class _TeamProfilePageState extends ConsumerState<TeamProfilePage> {
     if (_teamId == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    return SingleChildScrollView(
+    Future<void> onRefresh() async {
+      final teamId = _teamId;
+      if (teamId == null) return;
+      ref.invalidate(teamShellMetaProvider(teamId));
+      await _load(teamId);
+    }
+
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(24),
       child: Form(
         key: _formKey,
@@ -166,6 +178,7 @@ class _TeamProfilePageState extends ConsumerState<TeamProfilePage> {
           ),
         ]),
       ),
+    ),
     );
   }
 }

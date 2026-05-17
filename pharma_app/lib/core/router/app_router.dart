@@ -24,9 +24,6 @@ import '../../features/medicines/medicine_detail_page.dart';
 import '../../features/medicines/medicine_list_page.dart';
 import '../../features/notifications/notification_list_page.dart';
 import '../../features/pharmacy/pharmacy_shell.dart';
-import '../../features/platform_admin/create_team_page.dart';
-import '../../features/platform_admin/team_detail_page.dart';
-import '../../features/platform_admin/team_list_page.dart';
 import '../../features/pos/pos_page.dart';
 import '../../features/pos/sale_receipt_page.dart';
 import '../../features/purchases/create_purchase_page.dart';
@@ -158,23 +155,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         }
       }
 
-      if (loc.startsWith('/admin')) {
-        if (session == null) return '/login';
-        try {
-          final admin = await Supabase.instance.client
-              .from('platform_admins')
-              .select('is_active')
-              .eq('id', userId ?? '')
-              .maybeSingle();
-          final isActiveAdmin = admin?['is_active'] == true;
-          if (!isActiveAdmin) return '/pharmacy';
-        } catch (e) {
-          if (!isOnline || isConnectivityRelated(e)) return '/pharmacy';
-          rethrow;
-        }
-        return null;
-      }
-
       if (loc.startsWith('/pharmacy')) {
         if (session == null) return '/login';
         try {
@@ -300,23 +280,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/splash', builder: (context, state) => const AnimatedSplashPage()),
       GoRoute(path: '/', builder: (context, state) => const LandingPage()),
-      GoRoute(
-        path: '/admin/teams',
-        builder: (context, state) => const TeamListPage(),
-        routes: [
-          GoRoute(
-            path: 'new',
-            builder: (context, state) => const CreateTeamPage(),
-          ),
-          GoRoute(
-            path: ':teamId',
-            builder: (context, state) {
-              final id = state.pathParameters['teamId']!;
-              return TeamDetailPage(teamId: id);
-            },
-          ),
-        ],
-      ),
       GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
       GoRoute(
         path: '/callback',

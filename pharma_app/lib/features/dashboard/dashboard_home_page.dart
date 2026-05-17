@@ -25,7 +25,7 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
   Map<String, dynamic>? _metrics;
   int _unread = 0;
   DateTime? _lastUpdated;
-  final Set<String> _selectedCategoryIds = <String>{};
+  final Set<String> _selectedCategoryKeys = <String>{};
 
   @override
   void initState() {
@@ -100,9 +100,9 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
       params: {
         'p_team_id': teamId,
         'p_branch_id': branchId,
-        'p_category_ids': _selectedCategoryIds.isEmpty
+        'p_category_keys': _selectedCategoryKeys.isEmpty
             ? null
-            : _selectedCategoryIds.toList(growable: false),
+            : _selectedCategoryKeys.toList(growable: false),
       },
     );
   }
@@ -120,9 +120,9 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
   ) async {
     final fmt = DateFormat('yyyy-MM-dd');
     final today = _dateOnly(DateTime.now());
-    final catIds = _selectedCategoryIds.isEmpty
+    final catKeys = _selectedCategoryKeys.isEmpty
         ? null
-        : _selectedCategoryIds.toList(growable: false);
+        : _selectedCategoryKeys.toList(growable: false);
 
     Future<(num total, int count)> totalsForRange(
       DateTime from,
@@ -140,7 +140,7 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
           'p_max_amount': null,
           'p_payment_method': null,
           'p_overrides_only': false,
-          'p_category_ids': catIds,
+          'p_category_keys': catKeys,
         },
       );
       final rows =
@@ -440,19 +440,19 @@ class _DashboardHomePageState extends ConsumerState<DashboardHomePage> {
               contentPadding: EdgeInsets.zero,
               title: const Text('Medicine categories'),
               subtitle: Text(
-                _selectedCategoryIds.isEmpty
+                _selectedCategoryKeys.isEmpty
                     ? 'All categories'
-                    : '${_selectedCategoryIds.length} selected',
+                    : '${_selectedCategoryKeys.length} selected',
               ),
               trailing: const Icon(Icons.checklist_rounded),
               onTap: () async {
                 final selected = await _pickCategoryIds(
                   categoryOptions,
-                  _selectedCategoryIds,
+                  _selectedCategoryKeys,
                 );
                 if (selected == null) return;
                 setState(() {
-                  _selectedCategoryIds
+                  _selectedCategoryKeys
                     ..clear()
                     ..addAll(selected);
                 });

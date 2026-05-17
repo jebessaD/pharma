@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/auth/staff_login_email.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
+import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/widgets/app_feedback.dart';
 import '../../core/widgets/form_error_banner.dart';
 
@@ -219,6 +220,10 @@ class _EditStaffPageState extends ConsumerState<EditStaffPage> {
           .from('profiles')
           .update(update)
           .eq('id', widget.staffId);
+      final me = Supabase.instance.client.auth.currentUser?.id;
+      if (me != null && me == widget.staffId) {
+        ref.invalidate(pharmacyProfileProvider);
+      }
       if (!mounted) return;
       AppFeedback.success(context, 'Staff profile updated');
       context.pop();
