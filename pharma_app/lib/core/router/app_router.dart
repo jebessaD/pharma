@@ -4,9 +4,11 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../auth/auth_persistence.dart';
+import '../onboarding/first_install_intro.dart';
 import '../providers/app_update_gate_provider.dart';
 import '../providers/connectivity_provider.dart';
 import '../providers/pharmacy_redirect_cache_provider.dart';
+import '../roles/stock_permissions.dart';
 import '../providers.dart';
 import '../shared_preferences_provider.dart';
 import '../../features/audit/activity_log_page.dart';
@@ -39,6 +41,7 @@ import '../../features/shell/billing_blocked_page.dart';
 import '../../features/shell/animated_splash_page.dart';
 import '../../features/shell/landing_page.dart';
 import '../../features/shell/contact_us_page.dart';
+import '../../features/shell/first_install_intro_page.dart';
 import '../../features/shell/platform_messages_page.dart';
 import '../../features/shell/team_suspended_page.dart';
 import '../../features/shell/trial_ended_page.dart';
@@ -88,6 +91,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             lower.contains('failed to fetch');
       }
 
+      bool allowedPathMatches(String path, String allowedPath) =>
+          path == allowedPath || path.startsWith('$allowedPath/');
+
       bool isAllowedForRole(String role, String path) {
         const adminAllowed = <String>['/pharmacy'];
         const ownerAllowed = <String>['/pharmacy'];
@@ -96,7 +102,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           '/pharmacy/medicines',
           '/pharmacy/stock',
           '/pharmacy/low-stock',
-          '/pharmacy/stock-in',
           '/pharmacy/stock-movements',
           '/pharmacy/expiry',
           '/pharmacy/dashboard',
@@ -120,7 +125,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           'seller' => cashierAllowed,
           _ => const <String>[],
         };
-        return allowed.any((prefix) => path.startsWith(prefix));
+        if (!canAddStockInForRole(role) &&
+            (path == '/pharmacy/stock-in' ||
+                path.startsWith('/pharmacy/stock-in/'))) {
+          return false;
+        }
+        return allowed.any((prefix) => allowedPathMatches(path, prefix));
       }
 
       if (loc == '/trial-ended' && session == null) return '/login';
@@ -199,7 +209,18 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       }
 
       if (loc == '/splash') return null;
-      if (loc == '/' && session != null) return '/pharmacy';
+      if (session != null && (loc == '/' || loc == '/intro')) {
+        return '/pharmacy';
+      }
+
+      final introSeen = hasSeenFirstInstallIntro(
+        ref.read(sharedPreferencesProvider),
+      );
+      final introGatePath = loc == '/' || loc == '/login' || loc == '/signup';
+      if (session == null && !introSeen && loc != '/intro' && introGatePath) {
+        return '/intro';
+      }
+      if (loc == '/intro' && introSeen) return '/';
 
       final authRefresh = ref.read(supabaseAuthRefreshProvider);
 
@@ -221,8 +242,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               final pending = readPendingOwnerSignup(prefs);
               final meta = user.userMetadata ?? const <String, dynamic>{};
               final authEmail = user.email?.trim().toLowerCase() ?? '';
-              final pendingEmail =
-                  (pending.email ?? '').trim().toLowerCase();
+              final pendingEmail = (pending.email ?? '').trim().toLowerCase();
               final isPending =
                   authEmail.isNotEmpty && authEmail == pendingEmail;
 
@@ -235,8 +255,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                   (meta['full_name'] as String?) ??
                   '';
 
-              if (teamName.trim().length >= 2 &&
-                  fullName.trim().isNotEmpty) {
+              if (teamName.trim().length >= 2 && fullName.trim().isNotEmpty) {
                 try {
                   await Supabase.instance.client.rpc(
                     'bootstrap_owner_team',
@@ -278,7 +297,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(path: '/splash', builder: (context, state) => const AnimatedSplashPage()),
+      GoRoute(
+        path: '/splash',
+        builder: (context, state) => const AnimatedSplashPage(),
+      ),
+      GoRoute(
+        path: '/intro',
+        builder: (context, state) => const FirstInstallIntroPage(),
+      ),
       GoRoute(path: '/', builder: (context, state) => const LandingPage()),
       GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
       GoRoute(
@@ -313,10 +339,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             path: '/pharmacy',
             builder: (context, state) => const PharmacyHomePage(),
             routes: [
-              GoRoute(
-                path: 'home',
-                redirect: (context, state) => '/pharmacy',
-              ),
+              GoRoute(path: 'home', redirect: (context, state) => '/pharmacy'),
               GoRoute(
                 path: 'team-profile',
                 redirect: (context, state) =>
@@ -409,7 +432,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                       await ref
                           .read(pharmacyRedirectCacheProvider.notifier)
                           .hydrate(user.id);
-                      final role = ref.read(pharmacyRedirectCacheProvider)?.role;
+                      final role = ref
+                          .read(pharmacyRedirectCacheProvider)
+                          ?.role;
                       if (role == 'pharmacist') return '/pharmacy/medicines';
                       return null;
                     },
@@ -528,8 +553,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                   ),
                   GoRoute(
                     path: 'new',
-                    redirect: (context, state) =>
-                        '/pharmacy/purchases?tab=new',
+                    redirect: (context, state) => '/pharmacy/purchases?tab=new',
                   ),
                   GoRoute(
                     path: ':purchaseId',

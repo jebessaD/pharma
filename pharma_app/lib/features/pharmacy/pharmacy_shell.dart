@@ -24,6 +24,7 @@ import '../../core/providers/branches_list_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart'
     show isBranchLocked, selectedBranchIdProvider;
+import '../../core/roles/stock_permissions.dart';
 
 class _Dest {
   const _Dest({required this.path, required this.label, required this.icon});
@@ -157,35 +158,37 @@ class PharmacyShell extends ConsumerWidget {
       ];
     }
     if (role == 'pharmacist') {
-      return [
-        const _Section('Operations', [home, pos]),
-        const _Section('Catalog & stock', [
-          _Dest(
-            path: '/pharmacy/medicines',
-            label: 'Medicines',
-            icon: Icons.medication_rounded,
-          ),
-          _Dest(
-            path: '/pharmacy/stock',
-            label: 'Stock',
-            icon: Icons.inventory_2_rounded,
-          ),
-          _Dest(
+      final catalogDestinations = <_Dest>[
+        const _Dest(
+          path: '/pharmacy/medicines',
+          label: 'Medicines',
+          icon: Icons.medication_rounded,
+        ),
+        const _Dest(
+          path: '/pharmacy/stock',
+          label: 'Stock',
+          icon: Icons.inventory_2_rounded,
+        ),
+        if (canAddStockInForRole(role))
+          const _Dest(
             path: '/pharmacy/stock-in',
             label: 'Stock in',
             icon: Icons.add_box_rounded,
           ),
-          _Dest(
-            path: '/pharmacy/expiry',
-            label: 'Expiry',
-            icon: Icons.event_busy_rounded,
-          ),
-          _Dest(
-            path: '/pharmacy/stock-movements',
-            label: 'Stock history',
-            icon: Icons.swap_vert_rounded,
-          ),
-        ]),
+        const _Dest(
+          path: '/pharmacy/expiry',
+          label: 'Expiry',
+          icon: Icons.event_busy_rounded,
+        ),
+        const _Dest(
+          path: '/pharmacy/stock-movements',
+          label: 'Stock history',
+          icon: Icons.swap_vert_rounded,
+        ),
+      ];
+      return [
+        const _Section('Operations', [home, pos]),
+        _Section('Catalog & stock', catalogDestinations),
         const _Section('Insights', [
           _Dest(
             path: '/pharmacy/dashboard',
@@ -223,8 +226,8 @@ class PharmacyShell extends ConsumerWidget {
   Future<void> _signOut(BuildContext context, WidgetRef ref) async {
     if (!context.mounted) return;
     final container = ProviderScope.containerOf(context, listen: false);
-    final prevTeamId = container.read(pharmacyProfileProvider).value?['team_id']
-        as String?;
+    final prevTeamId =
+        container.read(pharmacyProfileProvider).value?['team_id'] as String?;
     final prefs = container.read(sharedPreferencesProvider);
     await Supabase.instance.client.auth.signOut();
     schedulePharmacySignOutCleanup(
@@ -356,411 +359,448 @@ class PharmacyShell extends ConsumerWidget {
           });
         });
 
-        return ref.watch(teamShellMetaProvider(teamId)).when(
-          loading: () => const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          ),
-          error: (e, st) => Scaffold(
-            body: AppErrorState(
-              message: userFacingError(e),
-              debugDetails: e.toString(),
-              onRetry: () {
-                ref.invalidate(teamShellMetaProvider(teamId));
-              },
-            ),
-          ),
-          data: (teamSnap) {
-            if (teamSnap['status'] == 'suspended') {
-              return const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
-              );
-            }
-
-            final branchesAsync = ref.watch(branchesListProvider(teamId));
-            final selectedBranch = ref.watch(selectedBranchIdProvider);
-            final role = profile['role'] as String? ?? '';
-            final branchLocked = isBranchLocked(role);
-            final sections = _sectionsForRole(role);
-            final allPaths = [
-              for (final s in sections)
-                for (final d in s.dests) d.path,
-            ];
-            final matched = matchedDrawerPath(path, paths: allPaths);
-
-            return branchesAsync.when(
+        return ref
+            .watch(teamShellMetaProvider(teamId))
+            .when(
               loading: () => const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) => Scaffold(
+              error: (e, st) => Scaffold(
                 body: AppErrorState(
                   message: userFacingError(e),
                   debugDetails: e.toString(),
                   onRetry: () {
-                    ref.invalidate(branchesListProvider(teamId));
+                    ref.invalidate(teamShellMetaProvider(teamId));
                   },
                 ),
               ),
-              data: (branches) {
-                final opsSnap = ref.watch(platformOpsProvider).asData?.value;
-                final banner = opsSnap?.bannerMessage;
-
-                final t = Theme.of(context);
-                final cs = t.colorScheme;
-                var branchTitle = 'Branch';
-                for (final b in branches) {
-                  if (b['id'] == selectedBranch) {
-                    branchTitle = b['name'] as String? ?? 'Branch';
-                    break;
-                  }
+              data: (teamSnap) {
+                if (teamSnap['status'] == 'suspended') {
+                  return const Scaffold(
+                    body: Center(child: CircularProgressIndicator()),
+                  );
                 }
-                final pharmacyName =
-                    (teamSnap['pharmacy_name'] as String? ?? '').trim();
-                final shellTitle = pharmacyName.isEmpty
-                    ? 'Pharmacy'
-                    : pharmacyName;
-                final roleLabel = role.isEmpty
-                    ? ''
-                    : '${role[0].toUpperCase()}${role.substring(1).toLowerCase()}';
 
-                final accountIdentity =
-                    PharmacyShell.accountIdentityLine(profile);
-                final youtubeOnboarding =
-                    ref.watch(youtubeOnboardingConfigProvider).value;
+                final branchesAsync = ref.watch(branchesListProvider(teamId));
+                final selectedBranch = ref.watch(selectedBranchIdProvider);
+                final role = profile['role'] as String? ?? '';
+                final branchLocked = isBranchLocked(role);
+                final sections = _sectionsForRole(role);
+                final allPaths = [
+                  for (final s in sections)
+                    for (final d in s.dests) d.path,
+                ];
+                final matched = matchedDrawerPath(path, paths: allPaths);
 
-                final sessionKey =
-                    '${profile['id'] as String? ?? ''}_$teamId';
-                return Scaffold(
-                  key: ValueKey<String>('pharmacy_shell_$sessionKey'),
-                  drawer: Drawer(
-                    width: 304,
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadiusDirectional.horizontal(
-                        end: Radius.circular(20),
-                      ),
-                    ),
-                    backgroundColor: cs.surface,
-                    child: SafeArea(
-                      child: ListView(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        children: [
-                          _DrawerHeader(
-                            key: ValueKey<String>('drawer_header_$sessionKey'),
-                            branchTitle: branches.isEmpty ? null : branchTitle,
-                            displayName: shellTitle,
-                            roleLabel: roleLabel.isEmpty ? null : roleLabel,
-                            accountIdentity: accountIdentity,
-                            teamId: teamId,
-                            selectedBranchId: selectedBranch,
-                            notificationsSelected:
-                                matched == '/pharmacy/notifications',
-                            platformMessagesSelected:
-                                matched == '/pharmacy/platform-messages',
-                            onOpenNotifications: () {
-                              HapticFeedback.selectionClick();
-                              Navigator.of(context).pop();
-                              if (path == '/pharmacy/notifications') return;
-                              context.go('/pharmacy/notifications');
-                            },
-                            onOpenPlatformMessages: () {
-                              HapticFeedback.selectionClick();
-                              Navigator.of(context).pop();
-                              if (path == '/pharmacy/platform-messages') return;
-                              context.go('/pharmacy/platform-messages');
-                            },
-                          ),
-                          ...List.generate(sections.length, (si) {
-                            final sec = sections[si];
-                            final showHowToUse =
-                                youtubeOnboarding?.isDrawerActive == true;
-                            return <Widget>[
-                              if (sec.title != null) ...[
-                                if (si > 0) const SizedBox(height: 4),
-                                _DrawerSectionLabel(title: sec.title!),
-                              ],
-                              ...sec.dests.expand((d) {
-                                final tiles = <Widget>[
-                                  _DrawerNavTile(
-                                    dest: d,
-                                    selected: d.path == matched,
-                                    onTap: () {
-                                      HapticFeedback.selectionClick();
-                                      Navigator.of(context).pop();
-                                      if (d.path == path) return;
-                                      context.go(d.path);
-                                    },
-                                  ),
-                                ];
-                                if (d.path == '/pharmacy/contact' &&
-                                    showHowToUse) {
-                                  tiles.add(
-                                    _DrawerNavTile(
-                                      dest: const _Dest(
-                                        path: '',
-                                        label: 'How to use',
-                                        icon: Icons
-                                            .play_circle_outline_rounded,
-                                      ),
-                                      leading: const YoutubeBrandIcon(
-                                        size: 26,
-                                      ),
-                                      selected: false,
-                                      onTap: () {
-                                        HapticFeedback.selectionClick();
-                                        Navigator.of(context).pop();
-                                        openYoutubeTutorial(
-                                          context,
-                                          url: youtubeOnboarding!.url,
-                                        );
-                                      },
-                                    ),
-                                  );
-                                }
-                                return tiles;
-                              }),
-                            ];
-                          }).expand((w) => w),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                            child: Divider(
-                              height: 1,
-                              color: cs.outlineVariant.withValues(alpha: 0.6),
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            child: _DrawerNavTile(
-                              dest: const _Dest(
-                                path: '',
-                                label: 'Sign out',
-                                icon: Icons.logout_rounded,
-                              ),
-                              selected: false,
-                              tone: _DrawerTileTone.muted,
-                              onTap: () {
-                                HapticFeedback.lightImpact();
-                                Navigator.of(context).pop();
-                                _signOut(context, ref);
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
+                return branchesAsync.when(
+                  loading: () => const Scaffold(
+                    body: Center(child: CircularProgressIndicator()),
+                  ),
+                  error: (e, _) => Scaffold(
+                    body: AppErrorState(
+                      message: userFacingError(e),
+                      debugDetails: e.toString(),
+                      onRetry: () {
+                        ref.invalidate(branchesListProvider(teamId));
+                      },
                     ),
                   ),
-                  body: SafeArea(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Material(
-                          elevation: 0.5,
-                          shadowColor: Colors.black.withValues(alpha: 0.08),
-                          color: cs.surface,
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(2, 2, 10, 2),
-                            child: Row(
-                              children: [
-                                Builder(
-                                  builder: (ctx) => IconButton(
-                                    tooltip: 'Menu',
-                                    icon: Icon(
-                                      Icons.menu_rounded,
-                                      color: cs.onSurface,
-                                    ),
-                                    onPressed: () =>
-                                        Scaffold.of(ctx).openDrawer(),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    shellTitle,
-                                    style: t.textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: -0.2,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                if (branches.isEmpty)
-                                  Padding(
-                                    padding: const EdgeInsetsDirectional.only(
-                                      end: 8,
-                                    ),
-                                    child: Text(
-                                      'No branches',
-                                      style: t.textTheme.labelSmall?.copyWith(
-                                        color: cs.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  )
-                                else if (branchLocked)
-                                  Padding(
-                                    padding: const EdgeInsetsDirectional.only(
-                                      end: 8,
-                                    ),
-                                    child: Text(
-                                      branchTitle,
-                                      style: t.textTheme.bodyMedium?.copyWith(
-                                        color: cs.onSurfaceVariant,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  )
-                                else
-                                  Align(
-                                    alignment: AlignmentDirectional.centerEnd,
-                                    child: ConstrainedBox(
-                                      constraints: const BoxConstraints(
-                                        maxWidth: 180,
-                                      ),
-                                      child: DropdownButtonHideUnderline(
-                                        child: DropdownButton<String>(
-                                          key: ValueKey<String>(
-                                            'branch_dd_$teamId',
-                                          ),
-                                          isExpanded: true,
-                                          isDense: true,
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          value:
-                                              selectedBranch != null &&
-                                                  branches.any(
-                                                    (b) =>
-                                                        b['id'] ==
-                                                        selectedBranch,
-                                                  )
-                                              ? selectedBranch
-                                              : null,
-                                          hint: Text(
-                                            'Branch',
-                                            style: t.textTheme.bodyMedium
-                                                ?.copyWith(
-                                                  color: cs.onSurfaceVariant,
-                                                ),
-                                          ),
-                                          items: branches
-                                              .map(
-                                                (b) => DropdownMenuItem<String>(
-                                                  value: b['id'] as String,
-                                                  child: Text(
-                                                    b['name'] as String? ?? '',
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                  ),
-                                                ),
-                                              )
-                                              .toList(),
-                                          onChanged: (v) async {
-                                            if (v != null) {
-                                              final current = selectedBranch;
-                                              if (current == v) return;
-                                              final proceed =
-                                                  await _confirmBranchSwitchIfDirty(
-                                                    context,
-                                                    ref,
-                                                  );
-                                              if (!proceed) return;
-                                              await ref
-                                                  .read(
-                                                    selectedBranchIdProvider
-                                                        .notifier,
-                                                  )
-                                                  .setBranch(v);
-                                            }
-                                          },
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
+                  data: (branches) {
+                    final opsSnap = ref
+                        .watch(platformOpsProvider)
+                        .asData
+                        ?.value;
+                    final banner = opsSnap?.bannerMessage;
+
+                    final t = Theme.of(context);
+                    final cs = t.colorScheme;
+                    var branchTitle = 'Branch';
+                    for (final b in branches) {
+                      if (b['id'] == selectedBranch) {
+                        branchTitle = b['name'] as String? ?? 'Branch';
+                        break;
+                      }
+                    }
+                    final pharmacyName =
+                        (teamSnap['pharmacy_name'] as String? ?? '').trim();
+                    final shellTitle = pharmacyName.isEmpty
+                        ? 'Pharmacy'
+                        : pharmacyName;
+                    final roleLabel = role.isEmpty
+                        ? ''
+                        : '${role[0].toUpperCase()}${role.substring(1).toLowerCase()}';
+
+                    final accountIdentity = PharmacyShell.accountIdentityLine(
+                      profile,
+                    );
+                    final youtubeOnboarding = ref
+                        .watch(youtubeOnboardingConfigProvider)
+                        .value;
+
+                    final sessionKey =
+                        '${profile['id'] as String? ?? ''}_$teamId';
+                    return Scaffold(
+                      key: ValueKey<String>('pharmacy_shell_$sessionKey'),
+                      drawer: Drawer(
+                        width: 304,
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadiusDirectional.horizontal(
+                            end: Radius.circular(20),
                           ),
                         ),
-                        if (!isOnline || syncStatus.pendingCount > 0)
-                          Material(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerHighest,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
+                        backgroundColor: cs.surface,
+                        child: SafeArea(
+                          child: ListView(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            children: [
+                              _DrawerHeader(
+                                key: ValueKey<String>(
+                                  'drawer_header_$sessionKey',
+                                ),
+                                branchTitle: branches.isEmpty
+                                    ? null
+                                    : branchTitle,
+                                displayName: shellTitle,
+                                roleLabel: roleLabel.isEmpty ? null : roleLabel,
+                                accountIdentity: accountIdentity,
+                                teamId: teamId,
+                                selectedBranchId: selectedBranch,
+                                notificationsSelected:
+                                    matched == '/pharmacy/notifications',
+                                platformMessagesSelected:
+                                    matched == '/pharmacy/platform-messages',
+                                onOpenNotifications: () {
+                                  HapticFeedback.selectionClick();
+                                  Navigator.of(context).pop();
+                                  if (path == '/pharmacy/notifications') return;
+                                  context.go('/pharmacy/notifications');
+                                },
+                                onOpenPlatformMessages: () {
+                                  HapticFeedback.selectionClick();
+                                  Navigator.of(context).pop();
+                                  if (path == '/pharmacy/platform-messages') {
+                                    return;
+                                  }
+                                  context.go('/pharmacy/platform-messages');
+                                },
                               ),
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.sync_problem_rounded,
-                                    size: 16,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      !isOnline
-                                          ? 'Offline - data will sync when internet returns.'
-                                          : 'Pending sync: ${syncStatus.pendingCount}',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        if (banner != null)
-                          MaterialBanner(
-                            backgroundColor: banner['severity'] == 'critical'
-                                ? cs.errorContainer
-                                    .withValues(alpha: 0.45)
-                                : cs.tertiaryContainer
-                                    .withValues(alpha: 0.55),
-                            content: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  banner['title'] as String? ?? '',
-                                  style: t.textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.w700,
+                              ...List.generate(sections.length, (si) {
+                                final sec = sections[si];
+                                final showHowToUse =
+                                    youtubeOnboarding?.isDrawerActive == true;
+                                return <Widget>[
+                                  if (sec.title != null) ...[
+                                    if (si > 0) const SizedBox(height: 4),
+                                    _DrawerSectionLabel(title: sec.title!),
+                                  ],
+                                  ...sec.dests.expand((d) {
+                                    final tiles = <Widget>[
+                                      _DrawerNavTile(
+                                        dest: d,
+                                        selected: d.path == matched,
+                                        onTap: () {
+                                          HapticFeedback.selectionClick();
+                                          Navigator.of(context).pop();
+                                          if (d.path == path) return;
+                                          context.go(d.path);
+                                        },
+                                      ),
+                                    ];
+                                    if (d.path == '/pharmacy/contact' &&
+                                        showHowToUse) {
+                                      tiles.add(
+                                        _DrawerNavTile(
+                                          dest: const _Dest(
+                                            path: '',
+                                            label: 'How to use',
+                                            icon: Icons
+                                                .play_circle_outline_rounded,
+                                          ),
+                                          leading: const YoutubeBrandIcon(
+                                            size: 26,
+                                          ),
+                                          selected: false,
+                                          onTap: () {
+                                            HapticFeedback.selectionClick();
+                                            Navigator.of(context).pop();
+                                            openYoutubeTutorial(
+                                              context,
+                                              url: youtubeOnboarding!.url,
+                                            );
+                                          },
+                                        ),
+                                      );
+                                    }
+                                    return tiles;
+                                  }),
+                                ];
+                              }).expand((w) => w),
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  16,
+                                  16,
+                                  8,
+                                ),
+                                child: Divider(
+                                  height: 1,
+                                  color: cs.outlineVariant.withValues(
+                                    alpha: 0.6,
                                   ),
                                 ),
-                                if (((banner['body'] as String?) ?? '')
-                                    .trim()
-                                    .isNotEmpty) ...[
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    (banner['body'] as String?)!.trim(),
-                                    style: t.textTheme.bodySmall?.copyWith(
-                                      height: 1.35,
-                                    ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                child: _DrawerNavTile(
+                                  dest: const _Dest(
+                                    path: '',
+                                    label: 'Sign out',
+                                    icon: Icons.logout_rounded,
                                   ),
-                                ],
-                              ],
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () async {
-                                  final id = banner['id'] as String?;
-                                  if (id != null) {
-                                    await markPlatformMessageRead(ref, id);
-                                  }
-                                },
-                                child: const Text('Dismiss'),
+                                  selected: false,
+                                  tone: _DrawerTileTone.muted,
+                                  onTap: () {
+                                    HapticFeedback.lightImpact();
+                                    Navigator.of(context).pop();
+                                    _signOut(context, ref);
+                                  },
+                                ),
                               ),
                             ],
                           ),
-                        Expanded(
-                          child: YoutubeOnboardingHost(child: child),
                         ),
-                      ],
-                    ),
-                  ),
+                      ),
+                      body: SafeArea(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Material(
+                              elevation: 0.5,
+                              shadowColor: Colors.black.withValues(alpha: 0.08),
+                              color: cs.surface,
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(2, 2, 10, 2),
+                                child: Row(
+                                  children: [
+                                    Builder(
+                                      builder: (ctx) => IconButton(
+                                        tooltip: 'Menu',
+                                        icon: Icon(
+                                          Icons.menu_rounded,
+                                          color: cs.onSurface,
+                                        ),
+                                        onPressed: () =>
+                                            Scaffold.of(ctx).openDrawer(),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        shellTitle,
+                                        style: t.textTheme.titleMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                              letterSpacing: -0.2,
+                                            ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (branches.isEmpty)
+                                      Padding(
+                                        padding:
+                                            const EdgeInsetsDirectional.only(
+                                              end: 8,
+                                            ),
+                                        child: Text(
+                                          'No branches',
+                                          style: t.textTheme.labelSmall
+                                              ?.copyWith(
+                                                color: cs.onSurfaceVariant,
+                                              ),
+                                        ),
+                                      )
+                                    else if (branchLocked)
+                                      Padding(
+                                        padding:
+                                            const EdgeInsetsDirectional.only(
+                                              end: 8,
+                                            ),
+                                        child: Text(
+                                          branchTitle,
+                                          style: t.textTheme.bodyMedium
+                                              ?.copyWith(
+                                                color: cs.onSurfaceVariant,
+                                              ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      )
+                                    else
+                                      Align(
+                                        alignment:
+                                            AlignmentDirectional.centerEnd,
+                                        child: ConstrainedBox(
+                                          constraints: const BoxConstraints(
+                                            maxWidth: 180,
+                                          ),
+                                          child: DropdownButtonHideUnderline(
+                                            child: DropdownButton<String>(
+                                              key: ValueKey<String>(
+                                                'branch_dd_$teamId',
+                                              ),
+                                              isExpanded: true,
+                                              isDense: true,
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              value:
+                                                  selectedBranch != null &&
+                                                      branches.any(
+                                                        (b) =>
+                                                            b['id'] ==
+                                                            selectedBranch,
+                                                      )
+                                                  ? selectedBranch
+                                                  : null,
+                                              hint: Text(
+                                                'Branch',
+                                                style: t.textTheme.bodyMedium
+                                                    ?.copyWith(
+                                                      color:
+                                                          cs.onSurfaceVariant,
+                                                    ),
+                                              ),
+                                              items: branches
+                                                  .map(
+                                                    (b) =>
+                                                        DropdownMenuItem<
+                                                          String
+                                                        >(
+                                                          value:
+                                                              b['id'] as String,
+                                                          child: Text(
+                                                            b['name']
+                                                                    as String? ??
+                                                                '',
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                          ),
+                                                        ),
+                                                  )
+                                                  .toList(),
+                                              onChanged: (v) async {
+                                                if (v != null) {
+                                                  final current =
+                                                      selectedBranch;
+                                                  if (current == v) return;
+                                                  final proceed =
+                                                      await _confirmBranchSwitchIfDirty(
+                                                        context,
+                                                        ref,
+                                                      );
+                                                  if (!proceed) return;
+                                                  await ref
+                                                      .read(
+                                                        selectedBranchIdProvider
+                                                            .notifier,
+                                                      )
+                                                      .setBranch(v);
+                                                }
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (!isOnline || syncStatus.pendingCount > 0)
+                              Material(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.sync_problem_rounded,
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          !isOnline
+                                              ? 'Offline - data will sync when internet returns.'
+                                              : 'Pending sync: ${syncStatus.pendingCount}',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodySmall,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            if (banner != null)
+                              MaterialBanner(
+                                backgroundColor:
+                                    banner['severity'] == 'critical'
+                                    ? cs.errorContainer.withValues(alpha: 0.45)
+                                    : cs.tertiaryContainer.withValues(
+                                        alpha: 0.55,
+                                      ),
+                                content: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      banner['title'] as String? ?? '',
+                                      style: t.textTheme.titleSmall?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    if (((banner['body'] as String?) ?? '')
+                                        .trim()
+                                        .isNotEmpty) ...[
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        (banner['body'] as String?)!.trim(),
+                                        style: t.textTheme.bodySmall?.copyWith(
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () async {
+                                      final id = banner['id'] as String?;
+                                      if (id != null) {
+                                        await markPlatformMessageRead(ref, id);
+                                      }
+                                    },
+                                    child: const Text('Dismiss'),
+                                  ),
+                                ],
+                              ),
+                            Expanded(
+                              child: YoutubeOnboardingHost(child: child),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 );
               },
             );
-          },
-        );
       },
     );
   }
@@ -1135,8 +1175,7 @@ class _DrawerNavTile extends StatelessWidget {
                     borderRadius: BorderRadius.circular(11),
                   ),
                   alignment: Alignment.center,
-                  child: leading ??
-                      Icon(dest.icon, size: 22, color: iconFg),
+                  child: leading ?? Icon(dest.icon, size: 22, color: iconFg),
                 ),
                 const SizedBox(width: 14),
                 Expanded(

@@ -10,6 +10,7 @@ import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/roles/stock_permissions.dart';
 import '../../core/utils/csv_export.dart';
 import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/app_error_state.dart';
@@ -225,6 +226,7 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
 
   Future<void> _openQuickAdjust(Map<String, dynamic> row) async {
     final profile = ref.read(pharmacyProfileProvider).value;
+    final canIncreaseStock = canAddStockInForRole(profile?['role'] as String?);
     final teamId = profile?['team_id'] as String?;
     final branchId = ref.read(selectedBranchIdProvider);
     if (teamId == null || branchId == null) {
@@ -237,8 +239,8 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
     final mb = row['medicine_batches'] as Map<String, dynamic>?;
     final batchId = mb?['id'] as String?;
     if (batchId == null || batchId.isEmpty) return;
-    final medicineName = ((mb?['medicines'] as Map<String, dynamic>?)?['name']
-            as String?) ??
+    final medicineName =
+        ((mb?['medicines'] as Map<String, dynamic>?)?['name'] as String?) ??
         'Medicine';
     final batchNo = (mb?['batch_no'] as String?) ?? '';
     final qtyOnHand = (row['qty_base_unit'] as num?) ?? 0;
@@ -248,7 +250,7 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
         final qtyCtl = TextEditingController();
         final reasonCtl = TextEditingController();
         final formKey = GlobalKey<FormState>();
-        var isReduce = false;
+        var isReduce = !canIncreaseStock;
         return StatefulBuilder(
           builder: (context, setLocalState) => AlertDialog(
             title: const Text('Adjust stock'),
@@ -268,17 +270,26 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 10),
-                  SegmentedButton<bool>(
-                    showSelectedIcon: false,
-                    segments: const [
-                      ButtonSegment<bool>(value: false, label: Text('Add')),
-                      ButtonSegment<bool>(value: true, label: Text('Reduce')),
-                    ],
-                    selected: {isReduce},
-                    onSelectionChanged: (next) {
-                      setLocalState(() => isReduce = next.first);
-                    },
-                  ),
+                  if (canIncreaseStock)
+                    SegmentedButton<bool>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment<bool>(value: false, label: Text('Add')),
+                        ButtonSegment<bool>(value: true, label: Text('Reduce')),
+                      ],
+                      selected: {isReduce},
+                      onSelectionChanged: (next) {
+                        setLocalState(() => isReduce = next.first);
+                      },
+                    )
+                  else
+                    Text(
+                      'Stock-in additions are limited to owners and admins. '
+                      'Record a reduction only.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   const SizedBox(height: 10),
                   TextFormField(
                     controller: qtyCtl,
@@ -328,14 +339,11 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                 onPressed: () {
                   if (formKey.currentState?.validate() != true) return;
                   final qty = num.parse(qtyCtl.text.trim());
-                  Navigator.pop(
-                    ctx,
-                    (
-                      isReduce: isReduce,
-                      qty: qty,
-                      reason: reasonCtl.text.trim(),
-                    ),
-                  );
+                  Navigator.pop(ctx, (
+                    isReduce: isReduce,
+                    qty: qty,
+                    reason: reasonCtl.text.trim(),
+                  ));
                 },
                 child: const Text('Apply'),
               ),
@@ -345,6 +353,12 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
       },
     );
     if (!mounted || payload == null) return;
+    if (!canIncreaseStock && !payload.isReduce) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Only owners and admins can add stock.')),
+      );
+      return;
+    }
     setState(() => _adjustingBatchId = batchId);
     try {
       await Supabase.instance.client.rpc(
@@ -400,6 +414,9 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
   Widget build(BuildContext context) {
     ref.listen(selectedBranchIdProvider, (previous, next) => _load());
     final cs = Theme.of(context).colorScheme;
+    final role =
+        ref.watch(pharmacyProfileProvider).asData?.value?['role'] as String?;
+    final canAddStockIn = canAddStockInForRole(role);
     final categoriesAsync = ref.watch(activeBranchMedicineCategoriesProvider);
     final categoryOptions =
         categoriesAsync.value
@@ -419,13 +436,15 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
           child: Row(
             children: [
-              FilledButton.tonalIcon(
-                onPressed: _isNavigating
-                    ? null
-                    : () => _safePush('/pharmacy/stock-in', reloadAfter: true),
-                icon: const Icon(Icons.add_box_outlined, size: 18),
-                label: const Text('Stock in'),
-              ),
+              if (canAddStockIn)
+                FilledButton.tonalIcon(
+                  onPressed: _isNavigating
+                      ? null
+                      : () =>
+                            _safePush('/pharmacy/stock-in', reloadAfter: true),
+                  icon: const Icon(Icons.add_box_outlined, size: 18),
+                  label: const Text('Stock in'),
+                ),
               const Spacer(),
               PopupMenuButton<String>(
                 tooltip: 'More actions',
@@ -439,16 +458,17 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                       await _exportCsv();
                   }
                 },
-                itemBuilder: (context) => const [
-                  PopupMenuItem<String>(
-                    value: 'many_lines',
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.playlist_add_outlined),
-                      title: Text('Many lines'),
+                itemBuilder: (context) => [
+                  if (canAddStockIn)
+                    const PopupMenuItem<String>(
+                      value: 'many_lines',
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(Icons.playlist_add_outlined),
+                        title: Text('Many lines'),
+                      ),
                     ),
-                  ),
-                  PopupMenuItem<String>(
+                  const PopupMenuItem<String>(
                     value: 'history',
                     child: ListTile(
                       dense: true,
@@ -456,7 +476,7 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                       title: Text('Stock history'),
                     ),
                   ),
-                  PopupMenuItem<String>(
+                  const PopupMenuItem<String>(
                     value: 'csv',
                     child: ListTile(
                       dense: true,
@@ -491,13 +511,20 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                     children: [
                       const Text('No stock rows yet'),
                       const SizedBox(height: 8),
-                      FilledButton(
-                        onPressed: () async {
-                          await context.push('/pharmacy/stock-in');
-                          if (mounted) _load();
-                        },
-                        child: const Text('Add stock'),
-                      ),
+                      if (canAddStockIn)
+                        FilledButton(
+                          onPressed: () async {
+                            await context.push('/pharmacy/stock-in');
+                            if (mounted) _load();
+                          },
+                          child: const Text('Add stock'),
+                        )
+                      else
+                        Text(
+                          'Ask a team owner or admin to receive inventory.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: cs.onSurfaceVariant),
+                        ),
                     ],
                   ),
                 )
@@ -509,7 +536,9 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                         padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
                         child: DecoratedBox(
                           decoration: BoxDecoration(
-                            color: cs.surfaceContainerHighest.withValues(alpha: 0.2),
+                            color: cs.surfaceContainerHighest.withValues(
+                              alpha: 0.2,
+                            ),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(color: cs.outlineVariant),
                           ),
@@ -521,19 +550,26 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                                 TextField(
                                   decoration: InputDecoration(
                                     hintText: 'Search medicine or batch',
-                                    prefixIcon: const Icon(Icons.search_rounded),
+                                    prefixIcon: const Icon(
+                                      Icons.search_rounded,
+                                    ),
                                     filled: true,
                                     fillColor: cs.surface,
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: cs.outlineVariant),
+                                      borderSide: BorderSide(
+                                        color: cs.outlineVariant,
+                                      ),
                                     ),
                                     enabledBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: cs.outlineVariant),
+                                      borderSide: BorderSide(
+                                        color: cs.outlineVariant,
+                                      ),
                                     ),
                                   ),
-                                  onChanged: (value) => setState(() => _query = value),
+                                  onChanged: (value) =>
+                                      setState(() => _query = value),
                                 ),
                                 const SizedBox(height: 8),
                                 Row(
@@ -541,8 +577,12 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                                     Expanded(
                                       child: Text(
                                         'Showing ${_displayRows.length} rows',
-                                        style: Theme.of(context).textTheme.bodySmall
-                                            ?.copyWith(color: cs.onSurfaceVariant),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: cs.onSurfaceVariant,
+                                            ),
                                       ),
                                     ),
                                     ActionChip(
@@ -573,7 +613,9 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                                           ? 'All categories'
                                           : '${_categoryFilterKeys.length} selected',
                                     ),
-                                    trailing: const Icon(Icons.checklist_rounded),
+                                    trailing: const Icon(
+                                      Icons.checklist_rounded,
+                                    ),
                                     onTap: () async {
                                       final selected = await _pickCategoryIds(
                                         categoryOptions,
@@ -608,7 +650,8 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                             final batch = mb?['batch_no'] as String? ?? '';
                             final exp = mb?['expiry_date'] as String? ?? '';
                             final batchId = mb?['id'] as String?;
-                            final busy = batchId != null && _adjustingBatchId == batchId;
+                            final busy =
+                                batchId != null && _adjustingBatchId == batchId;
                             return Column(
                               children: [
                                 ListTile(
@@ -627,15 +670,21 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                                   trailing: Text(
                                     busy ? '...' : '$qty',
                                     style: TextStyle(
-                                      color: busy ? cs.onSurfaceVariant : cs.primary,
+                                      color: busy
+                                          ? cs.onSurfaceVariant
+                                          : cs.primary,
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
-                                  onTap: busy ? null : () => _openQuickAdjust(r),
+                                  onTap: busy
+                                      ? null
+                                      : () => _openQuickAdjust(r),
                                 ),
                                 Divider(
                                   height: 1,
-                                  color: cs.outlineVariant.withValues(alpha: 0.5),
+                                  color: cs.outlineVariant.withValues(
+                                    alpha: 0.5,
+                                  ),
                                 ),
                               ],
                             );
@@ -794,6 +843,9 @@ class _LowStockPanelState extends ConsumerState<_LowStockPanel> {
       selectedBranchIdProvider,
       (String? previous, String? next) => _load(),
     );
+    final role =
+        ref.watch(pharmacyProfileProvider).asData?.value?['role'] as String?;
+    final canAddStockIn = canAddStockInForRole(role);
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -833,7 +885,9 @@ class _LowStockPanelState extends ConsumerState<_LowStockPanel> {
                     'Batch $batch · exp ${formatDdMmYyyy(exp)} · reorder ≤ $reorder',
                   ),
                   trailing: Text('$qty'),
-                  onTap: () => context.push('/pharmacy/stock-in'),
+                  onTap: canAddStockIn
+                      ? () => context.push('/pharmacy/stock-in')
+                      : null,
                 );
               },
             ),

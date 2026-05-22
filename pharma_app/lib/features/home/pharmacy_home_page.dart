@@ -11,6 +11,7 @@ import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/platform_messages_provider.dart';
 import '../../core/providers/team_shell_meta_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/roles/stock_permissions.dart';
 import '../../core/widgets/app_error_state.dart';
 import '../../core/widgets/form_error_banner.dart';
 
@@ -26,11 +27,9 @@ class PharmacyHomePage extends ConsumerWidget {
 
   static String _roleTagline(String role) {
     return switch (role) {
-      'cashier' =>
-        'Payments and receipts — use Sell when a customer is ready.',
-      'seller' =>
-        'Payments and receipts — use Sell when a customer is ready.',
-      'pharmacist' => 'Stock, batches, and expiry — keep the shelf accurate.',
+      'cashier' => 'Payments and receipts — use Sell when a customer is ready.',
+      'seller' => 'Payments and receipts — use Sell when a customer is ready.',
+      'pharmacist' => 'Stock balances and expiry — keep the shelf accurate.',
       'admin' => 'Operations, purchasing, and team — full control from here.',
       'owner' => 'Team ownership and full control — including admin access.',
       _ => 'Welcome back.',
@@ -71,14 +70,15 @@ class PharmacyHomePage extends ConsumerWidget {
                 accent: Color(0xFFDC2626),
                 accentSoft: Color(0xFFFEE2E2),
               ),
-              _HomeAction(
-                icon: Icons.add_box_rounded,
-                label: 'Stock in',
-                subtitle: 'Receive inventory',
-                path: '/pharmacy/stock-in',
-                accent: Color(0xFFD97706),
-                accentSoft: Color(0xFFFEF3C7),
-              ),
+              if (canAddStockInForRole(role))
+                _HomeAction(
+                  icon: Icons.add_box_rounded,
+                  label: 'Stock in',
+                  subtitle: 'Receive inventory',
+                  path: '/pharmacy/stock-in',
+                  accent: Color(0xFFD97706),
+                  accentSoft: Color(0xFFFEF3C7),
+                ),
               _HomeAction(
                 icon: Icons.swap_vert_rounded,
                 label: 'Movements',
@@ -313,7 +313,9 @@ class PharmacyHomePage extends ConsumerWidget {
                 SliverPadding(
                   padding: EdgeInsets.fromLTRB(pad, 0, pad, 8),
                   sliver: SliverToBoxAdapter(
-                    child: ref.watch(platformOpsProvider).when(
+                    child: ref
+                        .watch(platformOpsProvider)
+                        .when(
                           loading: () => const SizedBox.shrink(),
                           error: (_, _) => const SizedBox.shrink(),
                           data: (snap) => snap.messages.isEmpty
@@ -496,7 +498,9 @@ class _HomePlatformAnnouncements extends ConsumerWidget {
           final body = m['body'] as String? ?? '';
           final sev = m['severity'] as String? ?? 'info';
           final (icon, tone) = _severityStyle(context, sev);
-          final fill = tone.withValues(alpha: t.brightness == Brightness.dark ? 0.14 : 0.1);
+          final fill = tone.withValues(
+            alpha: t.brightness == Brightness.dark ? 0.14 : 0.1,
+          );
           final border = tone.withValues(alpha: 0.45);
 
           return Padding(
@@ -512,14 +516,14 @@ class _HomePlatformAnnouncements extends ConsumerWidget {
                 onTap: id.isEmpty
                     ? null
                     : read
-                        ? () {
-                            HapticFeedback.lightImpact();
-                            context.go('/pharmacy/platform-messages');
-                          }
-                        : () {
-                            HapticFeedback.lightImpact();
-                            markPlatformMessageRead(ref, id);
-                          },
+                    ? () {
+                        HapticFeedback.lightImpact();
+                        context.go('/pharmacy/platform-messages');
+                      }
+                    : () {
+                        HapticFeedback.lightImpact();
+                        markPlatformMessageRead(ref, id);
+                      },
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                   child: Row(
@@ -769,9 +773,7 @@ class _PosHeroCard extends StatelessWidget {
     );
 
     final title = emphasizeSell ? 'Open Sell' : 'Sell';
-    final headline = emphasizeSell
-        ? 'Sell & print receipt'
-        : 'Take payments';
+    final headline = emphasizeSell ? 'Sell & print receipt' : 'Take payments';
     final sub = emphasizeSell
         ? 'Cash or mobile — receipt opens after sale.'
         : 'Fast sales · Cash & mobile';

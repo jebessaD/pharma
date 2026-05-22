@@ -11,6 +11,7 @@ import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/providers/branch_change_guard_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/roles/stock_permissions.dart';
 import '../../core/widgets/slash_dd_mm_yyyy_input.dart';
 import 'stock_in_row_state.dart';
 import '../medicines/scan/medicine_lookup_resolver.dart';
@@ -29,6 +30,7 @@ class _BulkLine {
   final TextEditingController batchNo;
   final TextEditingController qty;
   final TextEditingController expiry;
+
   /// Optional override; when empty, server uses previous batch or medicine default.
   final TextEditingController unitCost;
   final TextEditingController sellPrice;
@@ -58,6 +60,8 @@ class StockInPage extends ConsumerStatefulWidget {
 class _StockInPageState extends ConsumerState<StockInPage>
     with SingleTickerProviderStateMixin {
   static const _guardKey = 'stock_in_page';
+  static const _stockInDeniedMessage =
+      'Stock-in is limited to team owners and admins.';
   late final TabController _tabs;
   late final BranchChangeGuard _branchGuard;
 
@@ -78,6 +82,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
   bool _bulkSubmitting = false;
 
   bool _bootstrapping = true;
+  bool _accessDenied = false;
   String? _error;
   final _resolver = const MedicineLookupResolver();
   List<Map<String, dynamic>> _lookupMatches = [];
@@ -199,6 +204,17 @@ class _StockInPageState extends ConsumerState<StockInPage>
 
   Future<void> _bootstrap() async {
     final profile = await ref.read(pharmacyProfileProvider.future);
+    final role = profile?['role'] as String?;
+    if (!canAddStockInForRole(role)) {
+      if (mounted) {
+        setState(() {
+          _bootstrapping = false;
+          _accessDenied = true;
+          _error = _stockInDeniedMessage;
+        });
+      }
+      return;
+    }
     final teamId = profile?['team_id'] as String?;
     if (teamId == null) {
       if (mounted) {
@@ -218,7 +234,9 @@ class _StockInPageState extends ConsumerState<StockInPage>
       }
       final data = await Supabase.instance.client
           .from('medicines')
-          .select('id, name, manual_code, barcode, generic_name, purchase_price, selling_price')
+          .select(
+            'id, name, manual_code, barcode, generic_name, purchase_price, selling_price',
+          )
           .eq('team_id', teamId)
           .eq('branch_id', branchId)
           .eq('is_active', true)
@@ -312,7 +330,18 @@ class _StockInPageState extends ConsumerState<StockInPage>
     return userFacingError(error);
   }
 
+  bool _ensureCanAddStockIn() {
+    final role = ref.read(pharmacyProfileProvider).value?['role'] as String?;
+    if (canAddStockInForRole(role)) return true;
+    setState(() {
+      _accessDenied = true;
+      _error = _stockInDeniedMessage;
+    });
+    return false;
+  }
+
   Future<void> _submitSingle() async {
+    if (!_ensureCanAddStockIn()) return;
     if (!(_singleFormKey.currentState?.validate() ?? false)) return;
     final iso = slashDdMmYyyyToIso(_expiry.text);
     final expErr = slashDdMmYyyyExpiryError(_expiry.text, _today);
@@ -466,7 +495,9 @@ class _StockInPageState extends ConsumerState<StockInPage>
     }
     List<Map<String, dynamic>> categories;
     try {
-      final data = await ref.read(activeBranchMedicineCategoriesProvider.future);
+      final data = await ref.read(
+        activeBranchMedicineCategoriesProvider.future,
+      );
       categories = List<Map<String, dynamic>>.from(data);
     } catch (_) {
       if (!mounted) return;
@@ -474,9 +505,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
       return;
     }
     if (categories.isEmpty) {
-      setState(
-        () => _error = 'Category list is unavailable. Please retry.',
-      );
+      setState(() => _error = 'Category list is unavailable. Please retry.');
       return;
     }
     if (!mounted) return;
@@ -550,14 +579,13 @@ class _StockInPageState extends ConsumerState<StockInPage>
                           onChanged: saving
                               ? null
                               : (value) {
-                                    if (value != null) {
-                                      setDialogState(() => categoryKey = value);
-                                    }
-                                  },
-                          validator: (value) =>
-                              value == null || value.isEmpty
-                                  ? 'Select a category'
-                                  : null,
+                                  if (value != null) {
+                                    setDialogState(() => categoryKey = value);
+                                  }
+                                },
+                          validator: (value) => value == null || value.isEmpty
+                              ? 'Select a category'
+                              : null,
                         ),
                         if (dialogError != null) ...[
                           const SizedBox(height: 10),
@@ -616,9 +644,9 @@ class _StockInPageState extends ConsumerState<StockInPage>
                                 )
                                 .single();
                             if (!dialogContext.mounted) return;
-                            Navigator.of(dialogContext).pop(
-                              Map<String, dynamic>.from(inserted),
-                            );
+                            Navigator.of(
+                              dialogContext,
+                            ).pop(Map<String, dynamic>.from(inserted));
                           } catch (e) {
                             if (!dialogContext.mounted) return;
                             setDialogState(() => dialogError = mapFormError(e));
@@ -647,10 +675,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
     final createdId = created['id'] as String?;
     if (createdId == null) return;
     setState(() {
-      _medicines = [
-        created,
-        ..._medicines.where((m) => m['id'] != createdId),
-      ];
+      _medicines = [created, ..._medicines.where((m) => m['id'] != createdId)];
       _error = null;
       _lookupMatches = [];
       _lookupTarget = null;
@@ -899,6 +924,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
   }
 
   Future<void> _submitBulkReadyOnly() async {
+    if (!_ensureCanAddStockIn()) return;
     final profile = ref.read(pharmacyProfileProvider).value;
     final teamId = profile?['team_id'] as String?;
     final branchId = ref.read(selectedBranchIdProvider);
@@ -1135,8 +1161,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
   }
 
   Widget _singleHeader() {
-    final isPharmacist = ref.watch(pharmacyRedirectCacheProvider)?.role ==
-        'pharmacist';
+    final isPharmacist =
+        ref.watch(pharmacyRedirectCacheProvider)?.role == 'pharmacist';
     final selected = _medicines.cast<Map<String, dynamic>?>().firstWhere(
       (m) => m?['id'] == _selectedMedicineId,
       orElse: () => null,
@@ -1240,8 +1266,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
   }
 
   Widget _bulkHeader() {
-    final isPharmacist = ref.watch(pharmacyRedirectCacheProvider)?.role ==
-        'pharmacist';
+    final isPharmacist =
+        ref.watch(pharmacyRedirectCacheProvider)?.role == 'pharmacist';
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     final t = Theme.of(context).textTheme;
     Widget compactAction({
@@ -1322,7 +1348,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
                 ),
                 const SizedBox(width: 8),
                 compactAction(
-                  onPressed: () => _scanForBulkLine(_bulkLines[_activeBulkIndex]),
+                  onPressed: () =>
+                      _scanForBulkLine(_bulkLines[_activeBulkIndex]),
                   icon: Icons.qr_code_scanner,
                   label: 'Scan',
                   primary: true,
@@ -1351,11 +1378,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
                   ),
                 )
               else
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: actions,
-                ),
+                Wrap(spacing: 8, runSpacing: 8, children: actions),
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -1619,6 +1642,17 @@ class _StockInPageState extends ConsumerState<StockInPage>
   Widget build(BuildContext context) {
     if (_bootstrapping) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_accessDenied) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Stock in')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(_stockInDeniedMessage, textAlign: TextAlign.center),
+          ),
+        ),
+      );
     }
     final t = Theme.of(context);
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
