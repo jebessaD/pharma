@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +12,7 @@ import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/review/app_review_prompter.dart';
 import '../../core/roles/stock_permissions.dart';
 import '../../core/utils/csv_export.dart';
 import '../../core/utils/date_formatters.dart';
@@ -169,16 +172,33 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('CSV copied to clipboard')),
           );
+          unawaited(
+            ref
+                .read(appReviewPrompterProvider)
+                .maybeRequestReview(AppReviewMoment.reportExported),
+          );
         }
         return;
       }
       await Share.share(text, subject: 'pharma_stock_export.csv');
+      if (mounted) {
+        unawaited(
+          ref
+              .read(appReviewPrompterProvider)
+              .maybeRequestReview(AppReviewMoment.reportExported),
+        );
+      }
     } catch (_) {
       try {
         await Clipboard.setData(ClipboardData(text: text));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('CSV copied to clipboard')),
+          );
+          unawaited(
+            ref
+                .read(appReviewPrompterProvider)
+                .maybeRequestReview(AppReviewMoment.reportExported),
           );
         }
       } catch (_) {

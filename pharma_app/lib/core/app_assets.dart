@@ -4,7 +4,7 @@ abstract final class AppAssets {
   static const String logo = 'logo.png';
 
   static const String welcomePharmacist =
-      'assets/onboarding/welcome-pharmacist.png';
+      'assets/onboarding/welcome-pharmacist.webp';
 
-  static const String inventoryCheck = 'assets/onboarding/inventory-check.png';
+  static const String inventoryCheck = 'assets/onboarding/inventory-check.webp';
 }

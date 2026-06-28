@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/app_assets.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
+import '../../core/registration/registration_location.dart';
 import '../../core/auth/auth_persistence.dart';
 import '../../core/shared_preferences_provider.dart';
 import '../../core/supabase_config.dart';
@@ -56,11 +57,16 @@ class _SignupPageState extends ConsumerState<SignupPage> {
     final team = _teamName.text.trim();
 
     try {
+      final registrationLocation = await inferRegistrationLocation();
       final authRes = await Supabase.instance.client.auth.signUp(
         email: email,
         password: pwd,
         emailRedirectTo: SupabaseConfig.emailRedirectTo,
-        data: {'full_name': name, 'team_name': team},
+        data: {
+          'full_name': name,
+          'team_name': team,
+          ...registrationLocation.toAuthMetadata(),
+        },
       );
 
       final user = authRes.user;
@@ -94,6 +100,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
             email: email,
             teamName: team,
             fullName: name,
+            registrationLocation: registrationLocation,
           );
           if (!mounted) return;
           setState(() {
@@ -114,7 +121,11 @@ class _SignupPageState extends ConsumerState<SignupPage> {
 
       await Supabase.instance.client.rpc(
         'bootstrap_owner_team',
-        params: {'p_team_name': team, 'p_full_name': name},
+        params: {
+          'p_team_name': team,
+          'p_full_name': name,
+          ...registrationLocation.toRpcParams(),
+        },
       );
 
       await persistLocalAuthMarker(
@@ -338,16 +349,16 @@ class _SignupPageState extends ConsumerState<SignupPage> {
                               ? const SizedBox(
                                   width: 22,
                                   height: 22,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 )
                               : const Text('Create account'),
                         ),
                         const SizedBox(height: 8),
                         TextButton(
                           onPressed: () => context.pushReplacement('/login'),
-                          child:
-                              const Text('Already have an account? Sign in'),
+                          child: const Text('Already have an account? Sign in'),
                         ),
                       ],
                     ),

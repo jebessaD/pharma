@@ -16,6 +16,7 @@ import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/providers/team_shell_meta_provider.dart';
+import '../../core/registration/registration_location.dart';
 import '../../core/shared_preferences_provider.dart';
 import '../../core/supabase_config.dart';
 import '../../core/app_assets.dart';
@@ -82,10 +83,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         } on AuthException {
           final res = await Supabase.instance.client.functions.invoke(
             'staff-sign-in-username',
-            body: {
-              'username': ident,
-              'password': pwd,
-            },
+            body: {'username': ident, 'password': pwd},
           );
           final d = res.data;
           if (d is! Map) throw Exception('bad_response');
@@ -125,6 +123,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             (isPending ? pending.fullName : null) ??
             (meta['full_name'] as String?) ??
             '';
+        final pendingLocation = isPending
+            ? pending.registrationLocation
+            : RegistrationLocation.empty;
+        final metadataLocation = RegistrationLocation.fromAuthMetadata(meta);
+        final registrationLocation = pendingLocation.isEmpty
+            ? metadataLocation
+            : pendingLocation;
 
         if (teamName.trim().length >= 2 && fullName.trim().isNotEmpty) {
           await Supabase.instance.client.rpc(
@@ -132,6 +137,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             params: {
               'p_team_name': teamName.trim(),
               'p_full_name': fullName.trim(),
+              ...registrationLocation.toRpcParams(),
             },
           );
           await clearPendingOwnerSignup(prefs);
@@ -187,7 +193,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   Future<void> _showForgotPasswordDialog() async {
     final messenger = ScaffoldMessenger.maybeOf(context);
-    final initialEmail = _identity.text.contains('@') ? _identity.text.trim() : '';
+    final initialEmail = _identity.text.contains('@')
+        ? _identity.text.trim()
+        : '';
     final sent = await showDialog<bool>(
       context: context,
       builder: (ctx) => _ForgotPasswordDialog(initialEmail: initialEmail),
@@ -195,8 +203,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     if (sent == true) {
       messenger?.showSnackBar(
         const SnackBar(
-          content:
-              Text('Reset email sent. Open the link to set a new password.'),
+          content: Text(
+            'Reset email sent. Open the link to set a new password.',
+          ),
         ),
       );
     }
@@ -306,9 +315,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         Align(
                           alignment: Alignment.centerRight,
                           child: TextButton(
-                            onPressed: _loading ? null : _showForgotPasswordDialog,
+                            onPressed: _loading
+                                ? null
+                                : _showForgotPasswordDialog,
                             style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
                               visualDensity: VisualDensity.compact,
                             ),
                             child: const Text('Forgot password?'),
@@ -325,8 +338,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                               ? const SizedBox(
                                   width: 22,
                                   height: 22,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 )
                               : const Text('Sign in'),
                         ),

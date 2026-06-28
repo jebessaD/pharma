@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.staff-username-available]
 verify_jwt = true
+
+[functions.registration-location]
+verify_jwt = false

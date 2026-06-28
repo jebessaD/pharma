@@ -1,11 +1,9 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/youtube_onboarding_provider.dart';
 import '../../core/youtube_video_id.dart';
 import 'youtube_onboarding_actions.dart';
-import 'youtube_tutorial_page.dart';
 import 'youtube_tutorial_preview.dart';
 
 Future<void> showYoutubeOnboardingDialog(
@@ -33,36 +31,13 @@ Future<void> openYoutubeTutorial(
   BuildContext context, {
   required String url,
 }) async {
-  final videoId = youtubeVideoIdFromUrl(url);
-  if (videoId == null) {
-    await openYoutubeOnboardingUrl(url);
-    return;
-  }
-
-  // Web has no webview_flutter platform — open YouTube in a browser tab.
-  if (kIsWeb) {
-    final watchUrl = url.contains('youtube') || url.contains('youtu.be')
-        ? url
-        : 'https://www.youtube.com/watch?v=$videoId';
-    final ok = await openYoutubeOnboardingUrl(watchUrl);
-    if (!context.mounted) return;
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not open the tutorial.')),
-      );
-    }
-    return;
-  }
-
+  final ok = await openYoutubeOnboardingUrl(url);
   if (!context.mounted) return;
-  await Navigator.of(context).push<void>(
-    MaterialPageRoute<void>(
-      builder: (_) => YoutubeTutorialPage(
-        videoId: videoId,
-        fallbackUrl: url,
-      ),
-    ),
-  );
+  if (!ok) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open YouTube.')),
+    );
+  }
 }
 
 class _YoutubeOnboardingDialog extends StatelessWidget {
@@ -149,9 +124,7 @@ class _YoutubeOnboardingDialog extends StatelessWidget {
                   const SizedBox(height: 6),
                   Text(
                     videoId != null
-                        ? (kIsWeb
-                              ? 'Tap the preview to open the tutorial in your browser.'
-                              : 'Tap the preview to watch the tutorial in the app.')
+                        ? 'Tap the preview to open the tutorial in YouTube.'
                         : 'Tutorial link is invalid. Try opening it externally.',
                     style: t.textTheme.bodyMedium?.copyWith(
                       color: cs.onSurfaceVariant,

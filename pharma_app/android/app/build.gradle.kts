@@ -73,5 +73,5 @@ flutter {
 
 dependencies {
     // enableEdgeToEdge() for MainActivity (Android 15 / targetSdk 35 guidance)
-    implementation("androidx.activity:activity-ktx:1.10.1")
+    implementation("androidx.activity:activity-ktx:1.11.0")
 }

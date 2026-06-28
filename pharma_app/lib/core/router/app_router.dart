@@ -8,6 +8,7 @@ import '../onboarding/first_install_intro.dart';
 import '../providers/app_update_gate_provider.dart';
 import '../providers/connectivity_provider.dart';
 import '../providers/pharmacy_redirect_cache_provider.dart';
+import '../registration/registration_location.dart';
 import '../roles/stock_permissions.dart';
 import '../providers.dart';
 import '../shared_preferences_provider.dart';
@@ -254,6 +255,15 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                   (isPending ? pending.fullName : null) ??
                   (meta['full_name'] as String?) ??
                   '';
+              final pendingLocation = isPending
+                  ? pending.registrationLocation
+                  : RegistrationLocation.empty;
+              final metadataLocation = RegistrationLocation.fromAuthMetadata(
+                meta,
+              );
+              final registrationLocation = pendingLocation.isEmpty
+                  ? metadataLocation
+                  : pendingLocation;
 
               if (teamName.trim().length >= 2 && fullName.trim().isNotEmpty) {
                 try {
@@ -262,6 +272,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                     params: {
                       'p_team_name': teamName.trim(),
                       'p_full_name': fullName.trim(),
+                      ...registrationLocation.toRpcParams(),
                     },
                   );
                   await clearPendingOwnerSignup(prefs);

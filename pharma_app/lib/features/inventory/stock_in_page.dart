@@ -1,9 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/utils/refresh_alerts_silent.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
 import '../../core/providers/medicine_categories_provider.dart';
@@ -11,7 +12,9 @@ import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/providers/branch_change_guard_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/review/app_review_prompter.dart';
 import '../../core/roles/stock_permissions.dart';
+import '../../core/utils/refresh_alerts_silent.dart';
 import '../../core/widgets/slash_dd_mm_yyyy_input.dart';
 import 'stock_in_row_state.dart';
 import '../medicines/scan/medicine_lookup_resolver.dart';
@@ -426,6 +429,11 @@ class _StockInPageState extends ConsumerState<StockInPage>
           _lookupBulkIndex = null;
         });
         _syncDirtyState();
+        unawaited(
+          ref
+              .read(appReviewPrompterProvider)
+              .maybeRequestReview(AppReviewMoment.stockRecorded),
+        );
       }
     } catch (error) {
       setState(() => _error = _friendlyError(error));
@@ -1015,6 +1023,11 @@ class _StockInPageState extends ConsumerState<StockInPage>
           });
           _syncDirtyState();
         }
+        unawaited(
+          ref
+              .read(appReviewPrompterProvider)
+              .maybeRequestReview(AppReviewMoment.stockRecorded),
+        );
       }
     } catch (e) {
       setState(() => _error = userFacingError(e));

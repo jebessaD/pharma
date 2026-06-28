@@ -13,6 +13,7 @@ import '../../core/utils/csv_export.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/review/app_review_prompter.dart';
 import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/form_error_banner.dart';
 
@@ -523,6 +524,11 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('CSV copied to clipboard')),
+        );
+        unawaited(
+          ref
+              .read(appReviewPrompterProvider)
+              .maybeRequestReview(AppReviewMoment.reportExported),
         );
       }
     } catch (_) {
