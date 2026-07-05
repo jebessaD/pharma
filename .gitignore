@@ -1,1 +1,4 @@
 .cursor/
+next-web/node_modules/
+next-web/.next/
+next-web/.env.local

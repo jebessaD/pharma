@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/widgets/pharmacy_hub_scaffold.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 import 'expired_panel.dart';
 import 'near_expiry_panel.dart';
 
@@ -62,28 +62,44 @@ class _ExpiryHubPageState extends ConsumerState<ExpiryHubPage>
 
   @override
   Widget build(BuildContext context) {
-    return PharmacyHubScaffold(
-      title: '',
-      subtitle: null,
-      tabController: _tabController,
-      tabs: const [
-        Tab(text: 'Near expiry', icon: Icon(Icons.event_busy_rounded)),
-        Tab(text: 'Expired', icon: Icon(Icons.hourglass_disabled_rounded)),
-      ],
-      tabBarViewChildren: [
-        NearExpiryPanel(
-          onViewExpired: () {
-            _tabController.animateTo(1);
-            context.go('/pharmacy/expiry?tab=expired');
-          },
-        ),
-        ExpiredPanel(
-          onViewNear: () {
-            _tabController.animateTo(0);
-            context.go('/pharmacy/expiry?tab=near');
-          },
-        ),
-      ],
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: HubPageHeader(title: 'Expiry'),
+          ),
+          TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(text: 'Near expiry'),
+              Tab(text: 'Expired'),
+            ],
+            dividerColor: cs.outlineVariant.withValues(alpha: 0.5),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                NearExpiryPanel(
+                  onViewExpired: () {
+                    _tabController.animateTo(1);
+                    context.go('/pharmacy/expiry?tab=expired');
+                  },
+                ),
+                ExpiredPanel(
+                  onViewNear: () {
+                    _tabController.animateTo(0);
+                    context.go('/pharmacy/expiry?tab=near');
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

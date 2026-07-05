@@ -17,11 +17,18 @@ class MedicineLookupResult {
 class MedicineLookupResolver {
   const MedicineLookupResolver();
 
+  static const _medicineSelect =
+      'id,name,generic_name,manual_code,barcode,purchase_price,selling_price,is_active,subcategory,country,presentation,strength,dosage_form';
+
   int _rank(Map<String, dynamic> row, String q) {
     final name = (row['name'] as String? ?? '').toLowerCase();
     final code = (row['manual_code'] as String? ?? '').toLowerCase();
     final barcode = (row['barcode'] as String? ?? '').toLowerCase();
     final generic = (row['generic_name'] as String? ?? '').toLowerCase();
+    final details = [
+      row['country'],
+      row['manual_code'],
+    ].map((value) => value?.toString() ?? '').join(' ').toLowerCase();
 
     if (name == q || code == q || barcode == q) return 0;
     if (name.startsWith(q)) return 1;
@@ -30,6 +37,8 @@ class MedicineLookupResolver {
     if (name.contains(q)) return 4;
     if (code.contains(q) || barcode.contains(q)) return 5;
     if (generic.contains(q)) return 6;
+    if (details.startsWith(q)) return 7;
+    if (details.contains(q)) return 8;
     return 99;
   }
 
@@ -48,9 +57,7 @@ class MedicineLookupResolver {
     final client = Supabase.instance.client;
     final barcodeRows = await client
         .from('medicines')
-        .select(
-          'id,name,generic_name,manual_code,barcode,purchase_price,selling_price,is_active',
-        )
+        .select(_medicineSelect)
         .eq('team_id', teamId)
         .eq('branch_id', branchId)
         .eq('is_active', true)
@@ -74,9 +81,7 @@ class MedicineLookupResolver {
 
     final manualRows = await client
         .from('medicines')
-        .select(
-          'id,name,generic_name,manual_code,barcode,purchase_price,selling_price,is_active',
-        )
+        .select(_medicineSelect)
         .eq('team_id', teamId)
         .eq('branch_id', branchId)
         .eq('is_active', true)
@@ -101,14 +106,12 @@ class MedicineLookupResolver {
     final like = '%${q.replaceAll('%', r'\%').replaceAll('_', r'\_')}%';
     final fuzzyRows = await client
         .from('medicines')
-        .select(
-          'id,name,generic_name,manual_code,barcode,purchase_price,selling_price,is_active',
-        )
+        .select(_medicineSelect)
         .eq('team_id', teamId)
         .eq('branch_id', branchId)
         .eq('is_active', true)
         .or(
-          'name.ilike.$like,generic_name.ilike.$like,manual_code.ilike.$like,barcode.ilike.$like',
+          'name.ilike.$like,generic_name.ilike.$like,manual_code.ilike.$like,barcode.ilike.$like,country.ilike.$like',
         )
         .limit(20);
     final fuzzyMatches = List<Map<String, dynamic>>.from(fuzzyRows as List)

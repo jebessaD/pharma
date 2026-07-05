@@ -5,6 +5,7 @@ import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
 import '../../core/widgets/app_feedback.dart';
 import '../../core/widgets/form_error_banner.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 
 class EditSupplierPage extends StatefulWidget {
   const EditSupplierPage({super.key, required this.supplierId});
@@ -75,14 +76,15 @@ class _EditSupplierPageState extends State<EditSupplierPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Edit supplier')),
+      appBar: pharmacyPageAppBar(context, title: 'Edit supplier'),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: Form(
                 key: _formKey,
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     TextFormField(
                       controller: _name,

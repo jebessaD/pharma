@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/layout/layout_density.dart';
 import '../../core/providers/connectivity_provider.dart';
 import '../../core/providers/post_pharmacy_sign_out.dart';
 import '../../core/router/matched_drawer_path.dart';
@@ -77,12 +78,13 @@ class PharmacyShell extends ConsumerWidget {
     );
     if (role == 'admin' || role == 'owner') {
       return [
-        const _Section('Operations', [home, pos]),
-        const _Section('Insights', [
+        const _Section('Operations', [
+          home,
+          pos,
           _Dest(
-            path: '/pharmacy/dashboard',
-            label: 'Overview',
-            icon: Icons.pie_chart_rounded,
+            path: '/pharmacy/reports',
+            label: 'Reports',
+            icon: Icons.assessment_outlined,
           ),
         ]),
         const _Section('Catalog & stock', [
@@ -119,11 +121,6 @@ class PharmacyShell extends ConsumerWidget {
             icon: Icons.notifications_active_rounded,
           ),
           _Dest(
-            path: '/pharmacy/suppliers',
-            label: 'Suppliers',
-            icon: Icons.local_shipping_rounded,
-          ),
-          _Dest(
             path: '/pharmacy/purchases',
             label: 'Purchases',
             icon: Icons.receipt_long_rounded,
@@ -134,18 +131,6 @@ class PharmacyShell extends ConsumerWidget {
             path: '/pharmacy/organization',
             label: 'Team & branches',
             icon: Icons.apartment_rounded,
-          ),
-        ]),
-        const _Section('Insights & reports', [
-          _Dest(
-            path: '/pharmacy/reports',
-            label: 'Report tables',
-            icon: Icons.table_chart_rounded,
-          ),
-          _Dest(
-            path: '/pharmacy/audit',
-            label: 'Audit log',
-            icon: Icons.history_rounded,
           ),
         ]),
         const _Section('Support', [
@@ -187,20 +172,16 @@ class PharmacyShell extends ConsumerWidget {
         ),
       ];
       return [
-        const _Section('Operations', [home, pos]),
-        _Section('Catalog & stock', catalogDestinations),
-        const _Section('Insights', [
-          _Dest(
-            path: '/pharmacy/dashboard',
-            label: 'Overview',
-            icon: Icons.pie_chart_rounded,
-          ),
+        const _Section('Operations', [
+          home,
+          pos,
           _Dest(
             path: '/pharmacy/reports',
-            label: 'Report tables',
-            icon: Icons.table_chart_rounded,
+            label: 'Reports',
+            icon: Icons.assessment_outlined,
           ),
         ]),
+        _Section('Catalog & stock', catalogDestinations),
         const _Section('Support', [
           _Dest(
             path: '/pharmacy/contact',
@@ -441,6 +422,7 @@ class PharmacyShell extends ConsumerWidget {
                         '${profile['id'] as String? ?? ''}_$teamId';
                     return Scaffold(
                       key: ValueKey<String>('pharmacy_shell_$sessionKey'),
+                      resizeToAvoidBottomInset: path != '/pharmacy/pos',
                       drawer: Drawer(
                         width: 304,
                         shape: const RoundedRectangleBorder(
@@ -852,7 +834,24 @@ class _DrawerHeader extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = Theme.of(context);
     final cs = t.colorScheme;
+    final density = context.layoutDensity;
     final topPad = MediaQuery.paddingOf(context).top > 0 ? 8.0 : 16.0;
+    final logoSize = density.v(compact: 46.0, standard: 48.0, comfortable: 52.0);
+    final logoIcon = density.v(compact: 26.0, standard: 28.0, comfortable: 30.0);
+    final headerTitleStyle = density.isComfortable
+        ? t.textTheme.headlineSmall?.copyWith(
+            color: cs.onPrimaryContainer,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.35,
+            height: 1.15,
+          )
+        : t.textTheme.titleLarge?.copyWith(
+            color: cs.onPrimaryContainer,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
+            height: 1.15,
+          );
+    final notifyIconSize = density.v(compact: 22.0, standard: 22.0, comfortable: 24.0);
     final primaryName = (displayName ?? '').trim();
     final showProfileName = primaryName.isNotEmpty;
     final headerTitle = showProfileName ? primaryName : 'Pharmacy';
@@ -870,16 +869,26 @@ class _DrawerHeader extends ConsumerWidget {
 
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      padding: EdgeInsets.fromLTRB(18, topPad + 8, 18, 20),
+      margin: EdgeInsets.fromLTRB(
+        density.v(compact: 12, standard: 12, comfortable: 14),
+        8,
+        density.v(compact: 12, standard: 12, comfortable: 14),
+        density.v(compact: 10, standard: 10, comfortable: 12),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        density.v(compact: 16, standard: 16, comfortable: 18),
+        topPad + density.v(compact: 6, standard: 6, comfortable: 8),
+        density.v(compact: 16, standard: 16, comfortable: 18),
+        density.v(compact: 16, standard: 16, comfortable: 18),
+      ),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
             cs.primaryContainer,
-            Color.lerp(cs.primaryContainer, cs.primary, 0.12)!,
+            Color.lerp(cs.primaryContainer, cs.primary, 0.1)!,
           ],
         ),
       ),
@@ -887,21 +896,32 @@ class _DrawerHeader extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 52,
-                height: 52,
+                width: logoSize,
+                height: logoSize,
                 decoration: BoxDecoration(
-                  color: cs.surface.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(14),
+                  color: cs.surface.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(
+                    density.v(compact: 12, standard: 12, comfortable: 14),
+                  ),
                 ),
                 child: Icon(
                   Icons.local_pharmacy_rounded,
-                  size: 30,
+                  size: logoIcon,
                   color: cs.primary,
                 ),
               ),
-              const Spacer(),
+              SizedBox(width: density.v(compact: 10, standard: 10, comfortable: 12)),
+              Expanded(
+                child: Text(
+                  headerTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: headerTitleStyle,
+                ),
+              ),
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -912,28 +932,28 @@ class _DrawerHeader extends ConsumerWidget {
                         tooltip: 'Notifications',
                         style: IconButton.styleFrom(
                           backgroundColor: notificationsSelected
-                              ? cs.primary.withValues(alpha: 0.2)
-                              : cs.surface.withValues(alpha: 0.55),
+                              ? cs.primary.withValues(alpha: 0.18)
+                              : cs.surface.withValues(alpha: 0.6),
                           foregroundColor: notificationsSelected
                               ? cs.primary
                               : cs.onPrimaryContainer,
                         ),
                         onPressed: onOpenNotifications,
-                        icon: const Icon(Icons.notifications_rounded),
+                        icon: Icon(Icons.notifications_rounded, size: notifyIconSize),
                       ),
                       if (showUnreadBadge)
                         PositionedDirectional(
-                          top: -4,
-                          end: -4,
+                          top: -3,
+                          end: -3,
                           child: Container(
-                            constraints: const BoxConstraints(minWidth: 18),
+                            constraints: const BoxConstraints(minWidth: 17),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 5,
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
                               color: cs.error,
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
                               unreadCount > 99 ? '99+' : '$unreadCount',
@@ -941,6 +961,7 @@ class _DrawerHeader extends ConsumerWidget {
                               style: t.textTheme.labelSmall?.copyWith(
                                 color: cs.onError,
                                 fontWeight: FontWeight.w700,
+                                fontSize: 10,
                                 height: 1,
                               ),
                             ),
@@ -956,28 +977,28 @@ class _DrawerHeader extends ConsumerWidget {
                         tooltip: 'Announcements',
                         style: IconButton.styleFrom(
                           backgroundColor: platformMessagesSelected
-                              ? cs.primary.withValues(alpha: 0.2)
-                              : cs.surface.withValues(alpha: 0.55),
+                              ? cs.primary.withValues(alpha: 0.18)
+                              : cs.surface.withValues(alpha: 0.6),
                           foregroundColor: platformMessagesSelected
                               ? cs.primary
                               : cs.onPrimaryContainer,
                         ),
                         onPressed: onOpenPlatformMessages,
-                        icon: const Icon(Icons.campaign_rounded),
+                        icon: Icon(Icons.campaign_rounded, size: notifyIconSize),
                       ),
                       if (showPlatformBadge)
                         PositionedDirectional(
-                          top: -4,
-                          end: -4,
+                          top: -3,
+                          end: -3,
                           child: Container(
-                            constraints: const BoxConstraints(minWidth: 18),
+                            constraints: const BoxConstraints(minWidth: 17),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 5,
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
                               color: cs.tertiary,
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
                               platformUnread > 99 ? '99+' : '$platformUnread',
@@ -985,6 +1006,7 @@ class _DrawerHeader extends ConsumerWidget {
                               style: t.textTheme.labelSmall?.copyWith(
                                 color: cs.onTertiary,
                                 fontWeight: FontWeight.w700,
+                                fontSize: 10,
                                 height: 1,
                               ),
                             ),
@@ -996,81 +1018,91 @@ class _DrawerHeader extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Text(
-            headerTitle,
-            style: t.textTheme.titleLarge?.copyWith(
-              color: cs.onPrimaryContainer,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
-            ),
-          ),
-          if (roleLabel != null) ...[
+          if (roleLabel != null || branchTitle != null) ...[
             const SizedBox(height: 8),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: cs.surface.withValues(alpha: 0.45),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                child: Text(
-                  roleLabel!,
-                  style: t.textTheme.labelMedium?.copyWith(
-                    color: cs.onSurface,
-                    fontWeight: FontWeight.w600,
+            Row(
+              children: [
+                if (roleLabel != null)
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: cs.surface.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 3,
+                      ),
+                      child: Text(
+                        roleLabel!,
+                        style: t.textTheme.labelMedium?.copyWith(
+                          color: cs.onSurface,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-              ),
+                if (roleLabel != null && branchTitle != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      '·',
+                      style: t.textTheme.labelMedium?.copyWith(
+                        color: cs.onPrimaryContainer.withValues(alpha: 0.65),
+                      ),
+                    ),
+                  ),
+                if (branchTitle != null)
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.storefront_rounded,
+                          size: 15,
+                          color: cs.onPrimaryContainer.withValues(alpha: 0.85),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            branchTitle!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.textTheme.bodySmall?.copyWith(
+                              color: cs.onPrimaryContainer.withValues(
+                                alpha: 0.9,
+                              ),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
             ),
           ],
           if ((accountIdentity ?? '').trim().isNotEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
                   Icons.account_circle_outlined,
-                  size: 18,
+                  size: density.v(compact: 16, standard: 18, comfortable: 18),
                   color: cs.onPrimaryContainer.withValues(alpha: 0.88),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     accountIdentity!.trim(),
-                    maxLines: 2,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: t.textTheme.bodySmall?.copyWith(
+                    style: (density.isCompact
+                            ? t.textTheme.bodySmall
+                            : t.textTheme.bodyMedium)
+                        ?.copyWith(
                       color: cs.onPrimaryContainer.withValues(alpha: 0.95),
-                      fontWeight: FontWeight.w600,
-                      height: 1.25,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if (branchTitle != null) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Icon(
-                  Icons.storefront_rounded,
-                  size: 16,
-                  color: cs.onPrimaryContainer.withValues(alpha: 0.85),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    branchTitle!,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.textTheme.bodySmall?.copyWith(
-                      color: cs.onPrimaryContainer.withValues(alpha: 0.9),
-                      height: 1.25,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
@@ -1142,6 +1174,7 @@ class _DrawerNavTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final cs = t.colorScheme;
+    final density = context.layoutDensity;
     final muted = tone == _DrawerTileTone.muted;
     final iconBg = selected
         ? cs.primary.withValues(alpha: 0.18)
@@ -1164,20 +1197,28 @@ class _DrawerNavTile extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(14),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            padding: EdgeInsets.symmetric(
+              horizontal: density.v(compact: 10, standard: 12, comfortable: 12),
+              vertical: density.v(compact: 10, standard: 12, comfortable: 12),
+            ),
             child: Row(
               children: [
                 Container(
-                  width: 40,
-                  height: 40,
+                  width: density.drawerIconBoxSize,
+                  height: density.drawerIconBoxSize,
                   decoration: BoxDecoration(
                     color: iconBg,
                     borderRadius: BorderRadius.circular(11),
                   ),
                   alignment: Alignment.center,
-                  child: leading ?? Icon(dest.icon, size: 22, color: iconFg),
+                  child: leading ??
+                      Icon(
+                        dest.icon,
+                        size: density.drawerIconSize,
+                        color: iconFg,
+                      ),
                 ),
-                const SizedBox(width: 14),
+                SizedBox(width: density.v(compact: 14, standard: 16, comfortable: 16)),
                 Expanded(
                   child: Text(
                     dest.label,

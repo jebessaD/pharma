@@ -5,11 +5,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/medicine_category_catalog.dart';
+import '../../core/layout/layout_density.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/widgets/app_error_state.dart';
+import '../../core/widgets/pharmacy_hub_list.dart';
 
 class MedicineListPage extends ConsumerStatefulWidget {
   const MedicineListPage({super.key});
@@ -97,76 +99,10 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
   Future<void> _openCategoryFilterSheet(
     List<Map<String, dynamic>> categories,
   ) async {
-    final result = await showModalBottomSheet<Set<String>>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        final temp = Set<String>.from(_selectedCategoryKeys);
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final maxH = MediaQuery.sizeOf(context).height * 0.55;
-            return SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ListTile(
-                    title: const Text('Medicine categories'),
-                    trailing: TextButton(
-                      onPressed: () => setModalState(() => temp.clear()),
-                      child: const Text('Clear'),
-                    ),
-                  ),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxHeight: maxH),
-                    child: ListView(
-                      shrinkWrap: true,
-                      children: [
-                        for (final c in categories)
-                          CheckboxListTile(
-                            value: temp.contains(c['id']),
-                            title: Text(c['name'] as String? ?? ''),
-                            onChanged: (checked) {
-                              setModalState(() {
-                                final id = c['id'] as String?;
-                                if (id == null) return;
-                                if (checked == true) {
-                                  temp.add(id);
-                                } else {
-                                  temp.remove(id);
-                                }
-                              });
-                            },
-                          ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text('Cancel'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: () =>
-                                Navigator.pop(ctx, Set<String>.from(temp)),
-                            child: const Text('Apply'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+    final result = await showPharmacyCategoryFilterSheet(
+      context,
+      selected: _selectedCategoryKeys,
+      categories: categories,
     );
     if (result != null && mounted) {
       setState(() {
@@ -259,76 +195,45 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     slivers: [
                       SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              if (branchId == null)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: Text(
-                                    'Select a branch in the menu to load medicines.',
-                                    style: Theme.of(context).textTheme.bodySmall
-                                        ?.copyWith(color: cs.onSurfaceVariant),
-                                  ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (branchId == null)
+                              Padding(
+                                padding: pharmacyHubFilterPadding(context)
+                                    .copyWith(bottom: 0),
+                                child: Text(
+                                  'Select a branch in the menu to load medicines.',
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: cs.onSurfaceVariant),
                                 ),
-                              TextField(
-                                decoration: InputDecoration(
-                                  hintText: 'Search medicine',
-                                  prefixIcon: const Icon(Icons.search_rounded),
-                                  filled: true,
-                                  fillColor: cs.surfaceContainerHighest
-                                      .withValues(alpha: 0.25),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(
-                                      color: cs.outlineVariant,
-                                    ),
-                                  ),
-                                ),
-                                onChanged: (value) =>
-                                    setState(() => _query = value),
                               ),
-                              const SizedBox(height: 8),
-                              categoriesAsync.when(
+                            PharmacyHubFilterSection(
+                              searchHint: 'Search medicine',
+                              onSearchChanged: (value) =>
+                                  setState(() => _query = value),
+                              countLabel:
+                                  'Showing ${filtered.length} of ${_rows.length}',
+                              categorySelectedCount:
+                                  _selectedCategoryKeys.length,
+                              onPickCategories: categoriesAsync.maybeWhen(
                                 data: (categories) {
                                   final list = categories
                                       .map((c) => Map<String, dynamic>.from(c))
                                       .toList();
-                                  return ListTile(
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 0,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      side: BorderSide(color: cs.outlineVariant),
-                                    ),
-                                    title: const Text('Medicine categories'),
-                                    subtitle: Text(
-                                      _selectedCategoryKeys.isEmpty
-                                          ? 'All categories'
-                                          : '${_selectedCategoryKeys.length} selected',
-                                    ),
-                                    trailing: const Icon(
-                                      Icons.checklist_rounded,
-                                    ),
-                                    onTap: () => _openCategoryFilterSheet(list),
-                                  );
+                                  return () =>
+                                      _openCategoryFilterSheet(list);
                                 },
+                                orElse: () => null,
+                              ),
+                              beforeCount: categoriesAsync.maybeWhen(
                                 loading: () => const LinearProgressIndicator(),
-                                error: (error, stackTrace) =>
+                                error: (_, __) =>
                                     const Text('Category filter unavailable'),
+                                orElse: () => null,
                               ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Showing ${filtered.length} of ${_rows.length}',
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(color: cs.onSurfaceVariant),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                       if (filtered.isEmpty)
@@ -348,7 +253,7 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                         )
                       else
                         SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          padding: pharmacyHubListPadding(context),
                           sliver: SliverList.builder(
                             itemCount: filtered.length,
                             itemBuilder: (context, i) {
@@ -357,60 +262,24 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                               final category = medicineCategoryLabel(
                                 m['category_key'] as String?,
                               );
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                elevation: 0,
-                                shadowColor: Colors.transparent,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  side: BorderSide(
-                                    color: cs.outlineVariant.withValues(
-                                      alpha: 0.5,
-                                    ),
-                                  ),
+                              return PharmacyHubListRow(
+                                icon: Icons.medication_outlined,
+                                title: m['name'] as String? ?? '',
+                                subtitle: [
+                                  if ((m['manual_code'] as String? ?? '')
+                                      .isNotEmpty)
+                                    m['manual_code'],
+                                  if ((m['generic_name'] as String? ?? '')
+                                      .isNotEmpty)
+                                    m['generic_name'],
+                                  if (category.isNotEmpty) category,
+                                ].join(' · '),
+                                trailing: Icon(
+                                  Icons.chevron_right_rounded,
+                                  size: context.layoutDensity.listIconSize,
+                                  color: cs.onSurfaceVariant,
                                 ),
-                                child: ListTile(
-                                  title: Text(
-                                    m['name'] as String? ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  subtitle: Text(
-                                    [
-                                      '${m['manual_code'] ?? ''} · ${m['generic_name'] ?? ''}',
-                                    ].join('\n'),
-                                  ),
-                                  leading: const Icon(Icons.medication_outlined),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (category.isNotEmpty)
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: cs.secondaryContainer,
-                                            borderRadius: BorderRadius.circular(999),
-                                          ),
-                                          child: Text(
-                                            category,
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              color: cs.onSecondaryContainer,
-                                            ),
-                                          ),
-                                        ),
-                                      const SizedBox(width: 8),
-                                      Icon(
-                                        Icons.chevron_right_rounded,
-                                        color: cs.onSurfaceVariant,
-                                      ),
-                                    ],
-                                  ),
-                                  onTap: () => _openMedicineDetail(id),
-                                ),
+                                onTap: () => _openMedicineDetail(id),
                               );
                             },
                           ),

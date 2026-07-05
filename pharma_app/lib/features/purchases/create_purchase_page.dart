@@ -7,11 +7,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/utils/refresh_alerts_silent.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
+import '../../core/medicine_catalog/medicine_catalog.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/providers/branch_change_guard_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/widgets/medicine_catalog_form_fields.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 import '../../core/widgets/slash_dd_mm_yyyy_input.dart';
 import '../medicines/searchable_picker_fields.dart';
 import 'purchase_drafts_refresh_provider.dart';
@@ -23,10 +26,17 @@ final _uuidPattern = RegExp(
 );
 
 class CreatePurchasePage extends ConsumerStatefulWidget {
-  const CreatePurchasePage({super.key, this.purchaseId});
+  const CreatePurchasePage({
+    super.key,
+    this.purchaseId,
+    this.initialSupplierId,
+  });
 
   /// When set, load this draft purchase (must be `status = draft`).
   final String? purchaseId;
+
+  /// Preselect a supplier when opening a new purchase from the supplier list.
+  final String? initialSupplierId;
 
   @override
   ConsumerState<CreatePurchasePage> createState() => _CreatePurchasePageState();
@@ -35,6 +45,7 @@ class CreatePurchasePage extends ConsumerStatefulWidget {
 class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
   static const _guardKey = 'create_purchase_page';
   final _formKey = GlobalKey<FormState>();
+  late final BranchChangeGuard _branchGuard;
   String? _supplierId;
   List<Map<String, dynamic>> _suppliers = [];
   List<Map<String, dynamic>> _medicines = [];
@@ -74,6 +85,7 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
   @override
   void initState() {
     super.initState();
+    _branchGuard = ref.read(branchChangeGuardProvider.notifier);
     _purchaseId = widget.purchaseId;
     _invoice.addListener(_syncDirtyState);
     _batch.addListener(_syncDirtyState);
@@ -83,9 +95,7 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     _sellPrice.addListener(_syncDirtyState);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ref
-          .read(branchChangeGuardProvider.notifier)
-          .register(_guardKey, onDiscard: _discardChanges);
+      _branchGuard.register(_guardKey, onDiscard: _discardChanges);
     });
     Future.microtask(_bootstrap);
   }
@@ -98,7 +108,7 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     _qty.removeListener(_syncDirtyState);
     _cost.removeListener(_syncDirtyState);
     _sellPrice.removeListener(_syncDirtyState);
-    ref.read(branchChangeGuardProvider.notifier).unregister(_guardKey);
+    _branchGuard.unregister(_guardKey);
     _invoice.dispose();
     _batch.dispose();
     _expiry.dispose();
@@ -119,10 +129,11 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
   bool get _isDirty {
     if (_partialLine) return true;
     if (_lineItems.isEmpty) {
+      final defaultSupplierId =
+          widget.initialSupplierId ??
+          (_suppliers.isNotEmpty ? _suppliers.first['id'] as String : null);
       return _invoice.text.trim().isNotEmpty ||
-          (_supplierId != null &&
-              _suppliers.isNotEmpty &&
-              _supplierId != _suppliers.first['id']);
+          (_supplierId != null && _supplierId != defaultSupplierId);
     }
     final inv = _purchaseHeader?['invoice_reference'] as String?;
     final invNorm = inv?.trim() ?? '';
@@ -133,7 +144,8 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
   }
 
   void _syncDirtyState() {
-    ref.read(branchChangeGuardProvider.notifier).setDirty(_guardKey, _isDirty);
+    if (!mounted) return;
+    _branchGuard.setDirty(_guardKey, _isDirty);
   }
 
   void _clearLineForm() {
@@ -157,14 +169,14 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
         _invoice.text = inv ?? '';
       } else {
         _invoice.clear();
-        if (_suppliers.isNotEmpty) {
-          _supplierId = _suppliers.first['id'] as String;
-        } else {
-          _supplierId = null;
-        }
+        _supplierId =
+            widget.initialSupplierId != null &&
+                _suppliers.any((s) => s['id'] == widget.initialSupplierId)
+            ? widget.initialSupplierId
+            : (_suppliers.isNotEmpty ? _suppliers.first['id'] as String : null);
       }
     });
-    ref.read(branchChangeGuardProvider.notifier).clearDirty(_guardKey);
+    _branchGuard.clearDirty(_guardKey);
   }
 
   Future<void> _loadLineItems(String purchaseId) async {
@@ -293,14 +305,18 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
         await _loadLineItems(purchaseId);
       } else {
         if (!mounted) return;
+        final preferredSupplierId =
+            widget.initialSupplierId != null &&
+                suppliers.any((s) => s['id'] == widget.initialSupplierId)
+            ? widget.initialSupplierId
+            : (suppliers.isNotEmpty ? suppliers.first['id'] as String : null);
         setState(() {
           _suppliers = suppliers;
           _medicines = medicines;
           _purchaseHeader = null;
           _purchaseId = null;
           _lineItems = [];
-          _supplierId =
-              suppliers.isNotEmpty ? suppliers.first['id'] as String : null;
+          _supplierId = preferredSupplierId;
         });
       }
     } catch (_) {
@@ -318,13 +334,13 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     }
   }
 
-  Future<void> _addLineFromFields(_AddLineFields f) async {
+  Future<bool> _addLineFromFields(_AddLineFields f) async {
     final profile = await ref.read(pharmacyProfileProvider.future);
     final teamId = profile?['team_id'] as String?;
     final branchId = ref.read(selectedBranchIdProvider);
     if (teamId == null || branchId == null || _supplierId == null) {
       setState(() => _error = 'Select supplier and branch first');
-      return;
+      return false;
     }
     final today = DateTime(
       DateTime.now().year,
@@ -333,12 +349,9 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     );
     final expiryError = slashDdMmYyyyExpiryError(f.expiryText, today);
     final expiryIso = slashDdMmYyyyToIso(f.expiryText);
-    if (f.qty <= 0 ||
-        f.cost < 0 ||
-        expiryError != null ||
-        expiryIso == null) {
+    if (f.qty <= 0 || f.cost < 0 || expiryError != null || expiryIso == null) {
       setState(() => _error = 'Enter valid quantity, unit cost, and expiry');
-      return;
+      return false;
     }
     setState(() {
       _saving = true;
@@ -362,16 +375,20 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
             .single();
         pid = purchase['id'] as String;
         _purchaseHeader = Map<String, dynamic>.from(purchase);
-        if (!mounted) return;
+        if (!mounted) return false;
         setState(() => _purchaseId = pid);
       } else {
-        await Supabase.instance.client.from('purchases').update({
-          'invoice_reference': _invoice.text.trim().isEmpty
-              ? null
-              : _invoice.text.trim(),
-        }).eq('id', pid);
+        await Supabase.instance.client
+            .from('purchases')
+            .update({
+              'invoice_reference': _invoice.text.trim().isEmpty
+                  ? null
+                  : _invoice.text.trim(),
+            })
+            .eq('id', pid);
         _purchaseHeader = {
-          if (_purchaseHeader != null) ...Map<String, dynamic>.from(_purchaseHeader!),
+          if (_purchaseHeader != null)
+            ...Map<String, dynamic>.from(_purchaseHeader!),
           'id': pid,
           'supplier_id': _supplierId,
           'invoice_reference': _invoice.text.trim().isEmpty
@@ -393,7 +410,7 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
           .insert(insertPayload)
           .select('id')
           .single();
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _lineItems = [
           ..._lineItems,
@@ -423,50 +440,131 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
         _medicinePickerKey++;
       });
       _syncDirtyState();
+      ref.read(purchaseDraftsRefreshProvider.notifier).bump();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Line added to this draft.')),
         );
       }
+      return true;
     } catch (_) {
       if (mounted) {
         setState(
-          () => _error =
-              'Could not add line. Check inputs and try again.',
+          () => _error = 'Could not add line. Check inputs and try again.',
         );
       }
+      return false;
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  Future<void> _addLineToDraft() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-    if (_supplierId == null) {
-      setState(() => _error = 'Select a supplier first.');
+  Future<void> _showAddSupplierDialog() async {
+    final profile = ref.read(pharmacyProfileProvider).value;
+    final teamId = profile?['team_id'] as String?;
+    if (teamId == null) {
+      setState(() => _error = 'No team');
       return;
     }
-    final mid = _selectedMedicineId;
-    if (mid == null) {
-      setState(() => _error = 'Select a medicine');
-      return;
-    }
-    final qty = num.tryParse(_qty.text);
-    final cost = num.tryParse(_cost.text);
-    if (qty == null || qty <= 0 || cost == null || cost < 0) {
-      setState(() => _error = 'Enter valid quantity and unit cost');
-      return;
-    }
-    final sp = num.tryParse(_sellPrice.text.trim());
-    await _addLineFromFields(
-      _AddLineFields(
-        medicineId: mid,
-        batch: _batch.text,
-        expiryText: _expiry.text,
-        qty: qty,
-        cost: cost,
-        sellPrice: sp,
-      ),
+
+    final formKey = GlobalKey<FormState>();
+    final name = TextEditingController();
+    final phone = TextEditingController();
+    String? formError;
+
+    final created = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) {
+        final screenW = MediaQuery.sizeOf(ctx).width;
+        final dialogWidth = (screenW - 48).clamp(320.0, 560.0);
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 24,
+            ),
+            title: const Text('Quick add supplier'),
+            content: SizedBox(
+              width: dialogWidth,
+              child: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextFormField(
+                      controller: name,
+                      decoration: const InputDecoration(labelText: 'Name'),
+                      validator: (v) =>
+                          FormValidators.requiredText(v, label: 'Name'),
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: phone,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(labelText: 'Phone'),
+                    ),
+                    if (formError != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        formError!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  if (formKey.currentState?.validate() != true) return;
+                  try {
+                    final row = await Supabase.instance.client
+                        .from('suppliers')
+                        .insert({
+                          'team_id': teamId,
+                          'name': name.text.trim(),
+                          'phone': phone.text.trim().isEmpty
+                              ? null
+                              : phone.text.trim(),
+                        })
+                        .select()
+                        .single();
+                    if (ctx.mounted) {
+                      Navigator.pop(ctx, Map<String, dynamic>.from(row));
+                    }
+                  } catch (e) {
+                    setDialogState(() => formError = userFacingError(e));
+                  }
+                },
+                child: const Text('Save & select'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    name.dispose();
+    phone.dispose();
+    if (created == null || !mounted) return;
+    final id = created['id'] as String?;
+    if (id == null) return;
+    setState(() {
+      _suppliers = [created, ..._suppliers.where((s) => s['id'] != id)];
+      _supplierId = id;
+      _error = null;
+    });
+    _syncDirtyState();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Supplier added and selected.')),
     );
   }
 
@@ -480,7 +578,9 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     }
     List<Map<String, dynamic>> categories;
     try {
-      final data = await ref.read(activeBranchMedicineCategoriesProvider.future);
+      final data = await ref.read(
+        activeBranchMedicineCategoriesProvider.future,
+      );
       categories = List<Map<String, dynamic>>.from(data);
     } catch (_) {
       if (!mounted) return;
@@ -488,10 +588,14 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
       return;
     }
     if (categories.isEmpty) {
-      setState(
-        () => _error = 'Category list is unavailable. Please retry.',
-      );
+      setState(() => _error = 'Category list is unavailable. Please retry.');
       return;
+    }
+    List<MedicineCatalogEntry> catalog;
+    try {
+      catalog = await ref.read(medicineCatalogProvider.future);
+    } catch (_) {
+      catalog = const [];
     }
     if (!mounted) return;
 
@@ -501,6 +605,7 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
         teamId: teamId,
         branchId: branchId,
         categories: categories,
+        catalog: catalog,
       ),
     );
 
@@ -509,10 +614,7 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     final createdId = row['id'] as String?;
     if (createdId == null) return;
     setState(() {
-      _medicines = [
-        row,
-        ..._medicines.where((m) => m['id'] != createdId),
-      ];
+      _medicines = [row, ..._medicines.where((m) => m['id'] != createdId)];
       _selectedMedicineId = createdId;
       _medicinePickerKey++;
       _error = null;
@@ -527,6 +629,271 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     }
   }
 
+  Future<void> _showAddLineDialog({required bool isPharmacist}) async {
+    if (_supplierId == null) {
+      setState(() => _error = 'Select a supplier first.');
+      return;
+    }
+
+    final dialogFormKey = GlobalKey<FormState>();
+    final batch = TextEditingController();
+    final expiry = TextEditingController();
+    final qty = TextEditingController();
+    final cost = TextEditingController();
+    final sellPrice = TextEditingController();
+    var selectedMedicineId = _selectedMedicineId;
+    var pickerKey = _medicinePickerKey;
+    var dialogSaving = false;
+    String? lineError;
+
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) {
+          final screen = MediaQuery.sizeOf(ctx);
+          final dialogWidth = (screen.width - 32).clamp(340.0, 720.0);
+          final maxHeight = screen.height * 0.82;
+          return StatefulBuilder(
+            builder: (context, setDialogState) => AlertDialog(
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 20,
+              ),
+              title: Text(
+                _lineItems.isEmpty ? 'Add first line' : 'Add another line',
+              ),
+              content: SizedBox(
+                width: dialogWidth,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: maxHeight),
+                  child: SingleChildScrollView(
+                    child: Form(
+                      key: dialogFormKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          MedicineAutocompleteField(
+                            key: ValueKey('purchase-med-dialog-$pickerKey'),
+                            rows: _medicines,
+                            initialMedicineId: selectedMedicineId,
+                            label: 'Search medicine',
+                            validator: (_) => selectedMedicineId == null
+                                ? 'Select a medicine'
+                                : null,
+                            onPicked: (row) {
+                              final id = row['id'] as String;
+                              setState(() => _selectedMedicineId = id);
+                              setDialogState(() => selectedMedicineId = id);
+                              _syncDirtyState();
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          if (!isPharmacist)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: OutlinedButton.icon(
+                                onPressed: dialogSaving
+                                    ? null
+                                    : () async {
+                                        await _showAddMedicineDialog();
+                                        if (!mounted || !ctx.mounted) return;
+                                        setDialogState(() {
+                                          selectedMedicineId =
+                                              _selectedMedicineId;
+                                          pickerKey = _medicinePickerKey;
+                                        });
+                                      },
+                                icon: const Icon(Icons.medication_outlined),
+                                label: const Text('Not found? Add medicine'),
+                              ),
+                            ),
+                          if (!isPharmacist) const SizedBox(height: 16),
+                          TextFormField(
+                            controller: batch,
+                            decoration: const InputDecoration(
+                              labelText: 'Batch no',
+                            ),
+                            validator: (value) =>
+                                (value == null || value.trim().isEmpty)
+                                ? 'Enter batch number'
+                                : null,
+                          ),
+                          const SizedBox(height: 14),
+                          TextFormField(
+                            controller: expiry,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [SlashDdMmYyyyInputFormatter()],
+                            decoration: slashDdMmYyyyInputDecoration(
+                              context,
+                              label: 'Expiry',
+                            ),
+                            validator: (value) => slashDdMmYyyyExpiryError(
+                              value ?? '',
+                              DateTime(
+                                DateTime.now().year,
+                                DateTime.now().month,
+                                DateTime.now().day,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          TextFormField(
+                            controller: qty,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*\.?\d{0,2}$'),
+                              ),
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'Qty (base units)',
+                              helperText: 'Added to stock on receive',
+                            ),
+                            validator: (value) {
+                              final q = num.tryParse(value ?? '');
+                              if (q == null || q <= 0) {
+                                return 'Enter quantity greater than 0';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 14),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: TextFormField(
+                                  controller: cost,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                        decimal: true,
+                                      ),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                      RegExp(r'^\d*\.?\d{0,2}$'),
+                                    ),
+                                  ],
+                                  decoration: const InputDecoration(
+                                    labelText: 'Unit cost (ETB)',
+                                    isDense: true,
+                                  ),
+                                  validator: (value) {
+                                    final co = num.tryParse(value ?? '');
+                                    if (co == null || co < 0) {
+                                      return 'Enter a valid unit cost';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextFormField(
+                                  controller: sellPrice,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                        decimal: true,
+                                      ),
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                      RegExp(r'^\d*\.?\d{0,2}$'),
+                                    ),
+                                  ],
+                                  decoration: const InputDecoration(
+                                    labelText: 'Sell price',
+                                    helperText: 'Optional',
+                                    isDense: true,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (lineError != null) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              lineError!,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: dialogSaving ? null : () => Navigator.pop(ctx),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  onPressed: dialogSaving
+                      ? null
+                      : () async {
+                          if (dialogFormKey.currentState?.validate() != true) {
+                            return;
+                          }
+                          final mid = selectedMedicineId;
+                          if (mid == null) {
+                            setDialogState(
+                              () => lineError = 'Select a medicine',
+                            );
+                            return;
+                          }
+                          final parsedQty = num.tryParse(qty.text);
+                          final parsedCost = num.tryParse(cost.text);
+                          if (parsedQty == null ||
+                              parsedQty <= 0 ||
+                              parsedCost == null ||
+                              parsedCost < 0) {
+                            setDialogState(
+                              () => lineError = 'Enter valid quantity and cost',
+                            );
+                            return;
+                          }
+                          setDialogState(() {
+                            dialogSaving = true;
+                            lineError = null;
+                          });
+                          final ok = await _addLineFromFields(
+                            _AddLineFields(
+                              medicineId: mid,
+                              batch: batch.text,
+                              expiryText: expiry.text,
+                              qty: parsedQty,
+                              cost: parsedCost,
+                              sellPrice: num.tryParse(sellPrice.text.trim()),
+                            ),
+                          );
+                          if (!ctx.mounted) return;
+                          if (ok) {
+                            Navigator.pop(ctx);
+                          } else {
+                            setDialogState(() => dialogSaving = false);
+                          }
+                        },
+                  icon: const Icon(Icons.add_rounded),
+                  label: Text(dialogSaving ? 'Adding...' : 'Add line'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    } finally {
+      batch.dispose();
+      expiry.dispose();
+      qty.dispose();
+      cost.dispose();
+      sellPrice.dispose();
+    }
+  }
+
   Future<void> _receive() async {
     final id = _purchaseId;
     if (id == null || _lineItems.isEmpty) {
@@ -535,11 +902,13 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
       );
       return;
     }
-    final lineSummaries = _lineItems.map((row) {
-      final name = row['medicine_name'] as String? ?? '';
-      final q = _formatQty(row['qty_base_unit']);
-      return '· $name — +$q base units to stock';
-    }).join('\n');
+    final lineSummaries = _lineItems
+        .map((row) {
+          final name = row['medicine_name'] as String? ?? '';
+          final q = _formatQty(row['qty_base_unit']);
+          return '· $name — +$q base units to stock';
+        })
+        .join('\n');
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -556,13 +925,12 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
               const SizedBox(height: 12),
               SelectableText(
                 lineSummaries,
-                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(height: 1.45),
+                style: Theme.of(
+                  ctx,
+                ).textTheme.bodySmall?.copyWith(height: 1.45),
               ),
               const SizedBox(height: 12),
-              Text(
-                'Continue?',
-                style: Theme.of(ctx).textTheme.bodyMedium,
-              ),
+              Text('Continue?', style: Theme.of(ctx).textTheme.bodyMedium),
             ],
           ),
         ),
@@ -588,6 +956,7 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
         'receive_purchase',
         params: {'p_purchase_id': id},
       );
+      if (!mounted) return;
       final profile = ref.read(pharmacyProfileProvider).value;
       final tid = profile?['team_id'] as String?;
       final bid = ref.read(selectedBranchIdProvider);
@@ -603,7 +972,7 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
       if (mounted) setState(() => _saving = false);
     }
     if (!mounted) return;
-    ref.read(branchChangeGuardProvider.notifier).clearDirty(_guardKey);
+    _branchGuard.clearDirty(_guardKey);
     ref.read(purchaseDraftsRefreshProvider.notifier).bump();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -660,8 +1029,8 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     });
 
     final branchId = ref.watch(selectedBranchIdProvider);
-    final isPharmacist = ref.watch(pharmacyRedirectCacheProvider)?.role ==
-        'pharmacist';
+    final isPharmacist =
+        ref.watch(pharmacyRedirectCacheProvider)?.role == 'pharmacist';
     final isEditMode = widget.purchaseId != null;
     final title = isEditMode ? 'Edit draft' : 'New purchase';
     final t = Theme.of(context);
@@ -675,28 +1044,46 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              DropdownButtonFormField<String>(
-                key: ValueKey(
-                  'supplier_${branchId ?? ''}_${_purchaseId ?? 'new'}_${_lineItems.length}',
-                ),
-                initialValue: _supplierId,
-                decoration: const InputDecoration(labelText: 'Supplier'),
-                items: _suppliers
-                    .map(
-                      (s) => DropdownMenuItem(
-                        value: s['id'] as String,
-                        child: Text(s['name'] as String? ?? ''),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      key: ValueKey(
+                        'supplier_${branchId ?? ''}_${_purchaseId ?? 'new'}_${_lineItems.length}',
                       ),
-                    )
-                    .toList(),
-                onChanged: _supplierLocked
-                    ? null
-                    : (v) {
-                        setState(() => _supplierId = v);
-                        _syncDirtyState();
-                      },
-                validator: (value) =>
-                    value == null ? 'Select a supplier' : null,
+                      initialValue: _supplierId,
+                      decoration: const InputDecoration(labelText: 'Supplier'),
+                      items: _suppliers
+                          .map(
+                            (s) => DropdownMenuItem(
+                              value: s['id'] as String,
+                              child: Text(s['name'] as String? ?? ''),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _supplierLocked
+                          ? null
+                          : (v) {
+                              setState(() => _supplierId = v);
+                              _syncDirtyState();
+                            },
+                      validator: (value) =>
+                          value == null ? 'Select a supplier' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: IconButton.filledTonal(
+                      tooltip: 'Quick add supplier',
+                      onPressed: _supplierLocked || _saving
+                          ? null
+                          : _showAddSupplierDialog,
+                      icon: const Icon(Icons.person_add_alt_1_outlined),
+                    ),
+                  ),
+                ],
               ),
               if (_supplierLocked)
                 Padding(
@@ -721,7 +1108,9 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
                   decoration: BoxDecoration(
                     color: cs.surfaceContainerLow.withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.65)),
+                    border: Border.all(
+                      color: cs.outlineVariant.withValues(alpha: 0.65),
+                    ),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -730,7 +1119,11 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.inventory_2_outlined, size: 22, color: cs.primary),
+                            Icon(
+                              Icons.inventory_2_outlined,
+                              size: 22,
+                              color: cs.primary,
+                            ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
@@ -766,7 +1159,9 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
                           final q = _formatQty(row['qty_base_unit']);
                           final c = _formatUnitCost(row['unit_cost']);
                           final sp = row['sell_price'];
-                          final spLabel = sp != null ? ' · Sell ${_formatUnitCost(sp)} ETB' : '';
+                          final spLabel = sp != null
+                              ? ' · Sell ${_formatUnitCost(sp)} ETB'
+                              : '';
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 10),
                             child: Container(
@@ -774,10 +1169,17 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
                                 color: cs.surface,
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: cs.outlineVariant.withValues(alpha: 0.55),
+                                  color: cs.outlineVariant.withValues(
+                                    alpha: 0.55,
+                                  ),
                                 ),
                               ),
-                              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                              padding: const EdgeInsets.fromLTRB(
+                                12,
+                                12,
+                                12,
+                                12,
+                              ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -793,7 +1195,9 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
                                   Text(
                                     'Qty $q base units · Cost $c ETB$spLabel',
                                     style: t.textTheme.bodySmall?.copyWith(
-                                      color: cs.onSurface.withValues(alpha: 0.82),
+                                      color: cs.onSurface.withValues(
+                                        alpha: 0.82,
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(height: 4),
@@ -814,190 +1218,22 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
                 ),
               ],
               const SizedBox(height: 24),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.add_circle_outline_rounded, size: 22, color: cs.primary),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Add a line',
-                              style: t.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.2,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        _lineItems.isEmpty
-                            ? 'Search a medicine, then enter batch, expiry, quantity, and unit cost.'
-                            : 'Add another batch line to this draft (same supplier).',
-                        style: t.textTheme.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                          height: 1.35,
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-              MedicineAutocompleteField(
-                key: ValueKey('purchase-med-$_medicinePickerKey'),
-                rows: _medicines,
-                initialMedicineId: _selectedMedicineId,
-                label: 'Search medicine',
-                validator: (_) =>
-                    _selectedMedicineId == null ? 'Select a medicine' : null,
-                onPicked: (row) {
-                  setState(() => _selectedMedicineId = row['id'] as String);
-                  _syncDirtyState();
-                },
-              ),
-              const SizedBox(height: 10),
-              if (!isPharmacist)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: _saving ? null : _showAddMedicineDialog,
-                    icon: const Icon(Icons.medication_outlined),
-                    label: const Text('Not found? Add medicine'),
-                  ),
-                ),
-              if (!isPharmacist) const SizedBox(height: 16),
-              if (isPharmacist) const SizedBox(height: 8),
-              Text(
-                'Batch & dates',
-                style: t.textTheme.labelLarge?.copyWith(
-                  color: cs.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _batch,
-                decoration: const InputDecoration(labelText: 'Batch no'),
-                validator: (value) => (value == null || value.trim().isEmpty)
-                    ? 'Enter batch number'
-                    : null,
-              ),
-              const SizedBox(height: 14),
-              TextFormField(
-                controller: _expiry,
-                keyboardType: TextInputType.number,
-                inputFormatters: [SlashDdMmYyyyInputFormatter()],
-                decoration: slashDdMmYyyyInputDecoration(
-                  context,
-                  label: 'Expiry',
-                ),
-                validator: (value) => slashDdMmYyyyExpiryError(
-                  value ?? '',
-                  DateTime(
-                    DateTime.now().year,
-                    DateTime.now().month,
-                    DateTime.now().day,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                'Quantity & cost',
-                style: t.textTheme.labelLarge?.copyWith(
-                  color: cs.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _qty,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d*\.?\d{0,2}$'),
-                        ),
-                      ],
-                      decoration: const InputDecoration(
-                        labelText: 'Qty (base units)',
-                        helperText: 'Added to stock on receive',
-                        isDense: true,
-                      ),
-                      validator: (value) {
-                        final q = num.tryParse(value ?? '');
-                        if (q == null || q <= 0) {
-                          return 'Enter quantity greater than 0';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _cost,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d*\.?\d{0,2}$'),
-                        ),
-                      ],
-                      decoration: const InputDecoration(
-                        labelText: 'Unit cost (ETB)',
-                        isDense: true,
-                      ),
-                      validator: (value) {
-                        final co = num.tryParse(value ?? '');
-                        if (co == null || co < 0) {
-                          return 'Enter a valid unit cost';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _sellPrice,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'^\d*\.?\d{0,2}$'),
-                        ),
-                      ],
-                      decoration: const InputDecoration(
-                        labelText: 'Sell price (optional)',
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
               FilledButton.icon(
-                onPressed: _saving ? null : _addLineToDraft,
+                onPressed: _saving
+                    ? null
+                    : () => _showAddLineDialog(isPharmacist: isPharmacist),
                 icon: const Icon(Icons.add_rounded),
-                label: const Text('Add line to draft'),
+                label: Text(
+                  _lineItems.isEmpty ? 'Add first line' : 'Add another line',
+                ),
               ),
-                    ],
-                  ),
+              const SizedBox(height: 8),
+              Text(
+                _lineItems.isEmpty
+                    ? 'Lines are added in a focused popup so this page stays about the purchase.'
+                    : 'Add more batches without scrolling through the whole editor.',
+                style: t.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
                 ),
               ),
             ],
@@ -1005,19 +1241,14 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
         ),
         if (_error != null) ...[
           const SizedBox(height: 12),
-          Text(
-            _error!,
-            style: TextStyle(color: cs.error),
-          ),
+          Text(_error!, style: TextStyle(color: cs.error)),
         ],
         const SizedBox(height: 12),
         if (_lineItems.isNotEmpty) ...[
           const SizedBox(height: 20),
           Text(
             'Receive goods posts each line’s quantity (shown above) into stock for this branch.',
-            style: t.textTheme.bodySmall?.copyWith(
-              color: cs.onSurfaceVariant,
-            ),
+            style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
         ],
@@ -1032,7 +1263,16 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
     if (_loading) {
       if (isEditMode) {
         return Scaffold(
-          appBar: AppBar(title: Text(title)),
+          appBar: pharmacyPageAppBar(
+            context,
+            title: title,
+            actions: [
+              TextButton(
+                onPressed: () => context.go('/pharmacy/purchases'),
+                child: const Text('All purchases'),
+              ),
+            ],
+          ),
           body: const Center(child: CircularProgressIndicator()),
         );
       }
@@ -1041,8 +1281,9 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
 
     if (isEditMode) {
       return Scaffold(
-        appBar: AppBar(
-          title: Text(title),
+        appBar: pharmacyPageAppBar(
+          context,
+          title: title,
           actions: [
             TextButton(
               onPressed: () => context.go('/pharmacy/purchases'),
@@ -1083,11 +1324,13 @@ class _AddMedicineFromPurchaseDialog extends StatefulWidget {
     required this.teamId,
     required this.branchId,
     required this.categories,
+    required this.catalog,
   });
 
   final String teamId;
   final String branchId;
   final List<Map<String, dynamic>> categories;
+  final List<MedicineCatalogEntry> catalog;
 
   @override
   State<_AddMedicineFromPurchaseDialog> createState() =>
@@ -1101,6 +1344,11 @@ class _AddMedicineFromPurchaseDialogState
   late final TextEditingController _generic;
   late final TextEditingController _code;
   late final TextEditingController _barcode;
+  late final TextEditingController _subcategory;
+  late final TextEditingController _country;
+  late final TextEditingController _presentation;
+  late final TextEditingController _strength;
+  late final TextEditingController _dosageForm;
   late String _categoryKey;
   bool _saving = false;
   String? _dialogError;
@@ -1112,6 +1360,11 @@ class _AddMedicineFromPurchaseDialogState
     _generic = TextEditingController();
     _code = TextEditingController();
     _barcode = TextEditingController();
+    _subcategory = TextEditingController();
+    _country = TextEditingController();
+    _presentation = TextEditingController();
+    _strength = TextEditingController();
+    _dosageForm = TextEditingController();
     _categoryKey = widget.categories.first['id'] as String;
   }
 
@@ -1121,7 +1374,25 @@ class _AddMedicineFromPurchaseDialogState
     _generic.dispose();
     _code.dispose();
     _barcode.dispose();
+    _subcategory.dispose();
+    _country.dispose();
+    _presentation.dispose();
+    _strength.dispose();
+    _dosageForm.dispose();
     super.dispose();
+  }
+
+  void _applyCatalogEntry(MedicineCatalogEntry entry) {
+    applyMedicineCatalogEntry(
+      entry: entry,
+      name: _name,
+      genericName: _generic,
+      subcategory: _subcategory,
+      country: _country,
+      presentation: _presentation,
+      strength: _strength,
+      dosageForm: _dosageForm,
+    );
   }
 
   Future<void> _onSave() async {
@@ -1132,27 +1403,40 @@ class _AddMedicineFromPurchaseDialogState
     });
     try {
       final codeRaw = _code.text.trim();
-      final inserted = await Supabase.instance.client.from('medicines').insert({
-        'team_id': widget.teamId,
-        'branch_id': widget.branchId,
-        'name': _name.text.trim(),
-        'generic_name': _generic.text.trim().isEmpty
-            ? null
-            : _generic.text.trim(),
-        'manual_code': codeRaw.isEmpty ? null : codeRaw,
-        'barcode': _barcode.text.trim().isEmpty ? null : _barcode.text.trim(),
-        'category_key': _categoryKey,
-        'purchase_price': 0,
-        'selling_price': 0,
-      }).select('id, name, manual_code, barcode, generic_name').single();
+      final inserted = await Supabase.instance.client
+          .from('medicines')
+          .insert({
+            'team_id': widget.teamId,
+            'branch_id': widget.branchId,
+            'name': _name.text.trim(),
+            'generic_name': _generic.text.trim().isEmpty
+                ? null
+                : _generic.text.trim(),
+            'manual_code': codeRaw.isEmpty ? null : codeRaw,
+            'barcode': _barcode.text.trim().isEmpty
+                ? null
+                : _barcode.text.trim(),
+            'category_key': _categoryKey,
+            'subcategory': optionalMedicineText(_subcategory),
+            'country': optionalMedicineText(_country),
+            'presentation': optionalMedicineText(_presentation),
+            'strength': optionalMedicineText(_strength),
+            'dosage_form': optionalMedicineText(_dosageForm),
+            'purchase_price': 0,
+            'selling_price': 0,
+          })
+          .select(
+            'id, name, manual_code, barcode, generic_name, subcategory, country, presentation, strength, dosage_form',
+          )
+          .single();
       if (!mounted) return;
       Navigator.of(context).pop(Map<String, dynamic>.from(inserted));
+      return;
     } catch (e) {
       if (!mounted) return;
       setState(() => _dialogError = mapFormError(e));
-    } finally {
-      if (mounted) setState(() => _saving = false);
     }
+    if (mounted) setState(() => _saving = false);
   }
 
   @override
@@ -1168,18 +1452,23 @@ class _AddMedicineFromPurchaseDialogState
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextFormField(
+                MedicineCatalogAutocompleteField(
                   controller: _name,
-                  decoration: const InputDecoration(labelText: 'Name'),
+                  catalog: widget.catalog,
+                  label: 'Name',
+                  onSelected: _applyCatalogEntry,
                   validator: (v) =>
                       FormValidators.requiredText(v, label: 'Name'),
                 ),
                 const SizedBox(height: 10),
-                TextFormField(
+                MedicineCatalogAutocompleteField(
                   controller: _generic,
-                  decoration: const InputDecoration(
-                    labelText: 'Generic name (optional)',
-                  ),
+                  catalog: widget.catalog,
+                  label: 'Generic name (optional)',
+                  hintText: 'Search by generic or medicine name',
+                  displayTextForOption: (entry) =>
+                      entry.genericName ?? entry.name,
+                  onSelected: _applyCatalogEntry,
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
@@ -1219,12 +1508,17 @@ class _AddMedicineFromPurchaseDialogState
                   validator: (value) =>
                       value == null ? 'Select a category' : null,
                 ),
+                const SizedBox(height: 10),
+                MedicineOptionalDetailsSection(
+                  subcategory: _subcategory,
+                  country: _country,
+                  presentation: _presentation,
+                  strength: _strength,
+                  dosageForm: _dosageForm,
+                ),
                 if (_dialogError != null) ...[
                   const SizedBox(height: 10),
-                  Text(
-                    _dialogError!,
-                    style: TextStyle(color: cs.error),
-                  ),
+                  Text(_dialogError!, style: TextStyle(color: cs.error)),
                 ],
               ],
             ),

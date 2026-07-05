@@ -5,7 +5,7 @@
     "display": "standalone",
     "background_color": "#E8F5E9",
     "theme_color": "#2E7D32",
-    "description": "Pharma Shelf — pharmacy operations for teams in Ethiopia (POS, stock, medicines, and more).",
+    "description": "Pharma Shelf — pharmacy operations for pharmacy teams (POS, stock, medicines, and more).",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

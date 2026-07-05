@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/layout/layout_density.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/app_error_state.dart';
+import '../../core/widgets/pharmacy_hub_list.dart';
 
 class ExpiredPanel extends ConsumerStatefulWidget {
   const ExpiredPanel({super.key, this.onViewNear});
@@ -26,11 +28,12 @@ class _ExpiredPanelState extends ConsumerState<ExpiredPanel> {
   List<Map<String, dynamic>> get _filteredRows {
     return _rows.where((r) {
       if (_query.trim().isEmpty) return true;
-      final med = r['medicines'] as Map<String, dynamic>?;
+      final batch = r['medicine_batches'] as Map<String, dynamic>?;
+      final med = batch?['medicines'] as Map<String, dynamic>?;
       return (med?['name'] as String? ?? '').toLowerCase().contains(
             _query.trim().toLowerCase(),
           ) ||
-          ('${r['batch_no'] ?? ''}').toLowerCase().contains(
+          ('${batch?['batch_no'] ?? ''}').toLowerCase().contains(
             _query.trim().toLowerCase(),
           );
     }).toList();
@@ -61,13 +64,26 @@ class _ExpiredPanelState extends ConsumerState<ExpiredPanel> {
     try {
       final today = DateTime.now().toUtc().toIso8601String().split('T').first;
       final data = await Supabase.instance.client
-          .from('medicine_batches')
-          .select('batch_no, expiry_date, medicines(name)')
+          .from('stock_balances')
+          .select(
+            'qty_base_unit, medicine_batches(batch_no, expiry_date, medicines(name))',
+          )
           .eq('team_id', teamId)
-          .eq('branch_id', branchId)
-          .lt('expiry_date', today)
-          .order('expiry_date', ascending: false);
-      setState(() => _rows = List<Map<String, dynamic>>.from(data as List));
+          .eq('branch_id', branchId);
+      final rows =
+          List<Map<String, dynamic>>.from(data as List).where((row) {
+            final qty = (row['qty_base_unit'] as num?) ?? 0;
+            final batch = row['medicine_batches'] as Map<String, dynamic>?;
+            final expiry = batch?['expiry_date'] as String?;
+            return qty > 0 && expiry != null && expiry.compareTo(today) < 0;
+          }).toList()..sort((a, b) {
+            final aBatch = a['medicine_batches'] as Map<String, dynamic>?;
+            final bBatch = b['medicine_batches'] as Map<String, dynamic>?;
+            return (bBatch?['expiry_date'] as String? ?? '').compareTo(
+              aBatch?['expiry_date'] as String? ?? '',
+            );
+          });
+      setState(() => _rows = rows);
     } catch (e) {
       setState(() => _error = userFacingError(e));
     } finally {
@@ -77,8 +93,7 @@ class _ExpiredPanelState extends ConsumerState<ExpiredPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final cs = t.colorScheme;
+    final cs = Theme.of(context).colorScheme;
     ref.listen(selectedBranchIdProvider, (previous, next) => _load());
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
@@ -99,7 +114,10 @@ class _ExpiredPanelState extends ConsumerState<ExpiredPanel> {
                 color: cs.primary.withValues(alpha: 0.75),
               ),
               const SizedBox(height: 8),
-              Text('No expired batches', style: t.textTheme.titleMedium),
+              Text(
+                'No expired batches',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 8),
               if (widget.onViewNear != null)
                 FilledButton.tonal(
@@ -114,130 +132,51 @@ class _ExpiredPanelState extends ConsumerState<ExpiredPanel> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+        padding: EdgeInsets.only(bottom: pharmacyHubListPadding(context).bottom),
         children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: cs.outlineVariant.withValues(alpha: 0.45),
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextField(
-                    decoration: const InputDecoration(
-                      labelText: 'Search medicine or batch',
-                      prefixIcon: Icon(Icons.search_rounded),
-                    ),
-                    onChanged: (value) => setState(() => _query = value),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      _ExpiredStatChip(
-                        icon: Icons.event_busy_rounded,
-                        label: 'Expired',
-                        value: '${_filteredRows.length}',
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+          PharmacyHubFilterSection(
+            searchHint: 'Search medicine or batch',
+            onSearchChanged: (value) => setState(() => _query = value),
+            countLabel: 'Showing ${_filteredRows.length} expired batches',
           ),
-          const SizedBox(height: 10),
-          ..._filteredRows.map((r) {
-            final med = r['medicines'] as Map<String, dynamic>?;
-            final expDate = DateTime.tryParse('${r['expiry_date'] ?? ''}');
-            final daysOver = expDate == null
-                ? null
-                : DateTime.now().difference(expDate).inDays;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Material(
-                color: cs.surface,
-                borderRadius: BorderRadius.circular(14),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: cs.error.withValues(alpha: 0.45)),
-                  ),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      radius: 17,
-                      backgroundColor: cs.errorContainer.withValues(alpha: 0.8),
-                      child: Icon(
-                        Icons.dangerous_rounded,
-                        color: cs.onErrorContainer,
-                        size: 18,
-                      ),
-                    ),
-                    title: Text(
-                      med?['name'] as String? ?? '',
-                      style: t.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    subtitle: Text(
-                      'Batch ${r['batch_no']} · exp ${formatDdMmYyyy(r['expiry_date'])}',
-                    ),
+          if (_filteredRows.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: Text('No search results found')),
+            )
+          else
+            Padding(
+              padding: pharmacyHubListPadding(context),
+              child: Column(
+                children: _filteredRows.map((r) {
+                  final batch = r['medicine_batches'] as Map<String, dynamic>?;
+                  final med = batch?['medicines'] as Map<String, dynamic>?;
+                  final expDate =
+                      DateTime.tryParse('${batch?['expiry_date'] ?? ''}');
+                  final daysOver = expDate == null
+                      ? null
+                      : DateTime.now().difference(expDate).inDays;
+                  final qty = (r['qty_base_unit'] as num?) ?? 0;
+                  return PharmacyHubListRow(
+                    icon: Icons.dangerous_rounded,
+                    iconColor: cs.error,
+                    borderColor: cs.error.withValues(alpha: 0.45),
+                    title: med?['name'] as String? ?? '',
+                    subtitle:
+                        'Batch ${batch?['batch_no'] ?? 'No batch'} · exp ${formatDdMmYyyy(batch?['expiry_date'])} · qty $qty',
                     trailing: Text(
                       daysOver == null ? 'Expired' : '${daysOver}d ago',
-                      style: t.textTheme.titleSmall?.copyWith(
+                      style: context.layoutDensity
+                          .listTitleStyle(Theme.of(context).textTheme)
+                          ?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: cs.error,
                       ),
                     ),
-                  ),
-                ),
+                  );
+                }).toList(),
               ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-}
-
-class _ExpiredStatChip extends StatelessWidget {
-  const _ExpiredStatChip({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final cs = t.colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: cs.error),
-          const SizedBox(width: 6),
-          Text('$label: ', style: t.textTheme.labelMedium),
-          Text(
-            value,
-            style: t.textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w700,
             ),
-          ),
         ],
       ),
     );

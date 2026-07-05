@@ -58,7 +58,13 @@ String _functionDetailsToMessage(dynamic d) {
   }
   if (d is Map) {
     final err = d['error'] ?? d['message'] ?? d['msg'] ?? d['error_description'];
-    if (err != null) return err.toString().trim();
+    if (err != null) {
+      final text = err.toString().trim();
+      if (text.isNotEmpty && text != '{}') return text;
+    }
+    if (d.isEmpty) {
+      return 'Request failed. Try again or contact support.';
+    }
     return jsonEncode(d);
   }
   if (d is Uint8List) {

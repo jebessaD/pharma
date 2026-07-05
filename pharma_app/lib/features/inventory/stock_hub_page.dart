@@ -1,23 +1,19 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/layout/layout_density.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
-import '../../core/review/app_review_prompter.dart';
 import '../../core/roles/stock_permissions.dart';
-import '../../core/utils/csv_export.dart';
 import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/app_error_state.dart';
-import '../../core/widgets/pharmacy_hub_scaffold.dart';
+import '../../core/widgets/pharmacy_hub_list.dart';
 
 enum StockHubTab { balances, low }
 
@@ -75,31 +71,58 @@ class _StockHubPageState extends ConsumerState<StockHubPage>
 
   @override
   Widget build(BuildContext context) {
-    return PharmacyHubScaffold(
-      title: '',
-      subtitle: null,
-      tabController: _tabController,
-      tabs: const [
-        Tab(text: 'Balances', icon: Icon(Icons.inventory_2_rounded)),
-        Tab(text: 'Low stock', icon: Icon(Icons.warning_amber_rounded)),
-      ],
-      tabBarViewChildren: [
-        _StockBalancePanel(
-          onOpenLowStockTab: () {
-            _tabController.animateTo(1);
-            context.go('/pharmacy/stock?tab=low');
-          },
-        ),
-        const _LowStockPanel(),
-      ],
+    final role =
+        ref.watch(pharmacyProfileProvider).asData?.value?['role'] as String?;
+    final canAddStockIn = canAddStockInForRole(role);
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      floatingActionButton: canAddStockIn
+          ? FloatingActionButton.extended(
+              onPressed: () => context.push('/pharmacy/stock-in'),
+              icon: const Icon(Icons.add_box_outlined),
+              label: const Text('Stock in'),
+            )
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TabBar(
+                  controller: _tabController,
+                  tabs: const [
+                    Tab(text: 'Balances'),
+                    Tab(text: 'Low stock'),
+                  ],
+                  dividerColor: cs.outlineVariant.withValues(alpha: 0.5),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Stock history',
+                onPressed: () => context.push('/pharmacy/stock-movements'),
+                icon: const Icon(Icons.history_rounded),
+              ),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: const [
+                _StockBalancePanel(),
+                _LowStockPanel(),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _StockBalancePanel extends ConsumerStatefulWidget {
-  const _StockBalancePanel({required this.onOpenLowStockTab});
-
-  final VoidCallback onOpenLowStockTab;
+  const _StockBalancePanel();
 
   @override
   ConsumerState<_StockBalancePanel> createState() => _StockBalancePanelState();
@@ -111,9 +134,7 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
   List<Map<String, dynamic>> _rows = [];
   String _query = '';
   bool _sortByQtyDesc = true;
-  bool _isNavigating = false;
   final Set<String> _categoryFilterKeys = <String>{};
-  String? _adjustingBatchId;
 
   List<Map<String, dynamic>> get _displayRows {
     var rows = List<Map<String, dynamic>>.from(_rows);
@@ -149,68 +170,6 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
     Future.microtask(_load);
   }
 
-  Future<void> _exportCsv() async {
-    if (_displayRows.isEmpty) return;
-    final lines = <String>['medicine,batch,expiry,qty'];
-    for (final r in _displayRows) {
-      final mb = r['medicine_batches'] as Map<String, dynamic>?;
-      final med = mb?['medicines'] as Map<String, dynamic>?;
-      lines.add(
-        [
-          csvEscapeField(med?['name']),
-          csvEscapeField(mb?['batch_no']),
-          csvEscapeField(mb?['expiry_date']),
-          csvEscapeField(r['qty_base_unit']),
-        ].join(','),
-      );
-    }
-    final text = lines.join('\n');
-    try {
-      if (kIsWeb) {
-        await Clipboard.setData(ClipboardData(text: text));
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('CSV copied to clipboard')),
-          );
-          unawaited(
-            ref
-                .read(appReviewPrompterProvider)
-                .maybeRequestReview(AppReviewMoment.reportExported),
-          );
-        }
-        return;
-      }
-      await Share.share(text, subject: 'pharma_stock_export.csv');
-      if (mounted) {
-        unawaited(
-          ref
-              .read(appReviewPrompterProvider)
-              .maybeRequestReview(AppReviewMoment.reportExported),
-        );
-      }
-    } catch (_) {
-      try {
-        await Clipboard.setData(ClipboardData(text: text));
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('CSV copied to clipboard')),
-          );
-          unawaited(
-            ref
-                .read(appReviewPrompterProvider)
-                .maybeRequestReview(AppReviewMoment.reportExported),
-          );
-        }
-      } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not export CSV.')),
-          );
-        }
-      }
-    }
-  }
-
   Future<void> _load() async {
     final profile = await ref.read(pharmacyProfileProvider.future);
     final teamId = profile?['team_id'] as String?;
@@ -244,196 +203,9 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
     }
   }
 
-  Future<void> _openQuickAdjust(Map<String, dynamic> row) async {
-    final profile = ref.read(pharmacyProfileProvider).value;
-    final canIncreaseStock = canAddStockInForRole(profile?['role'] as String?);
-    final teamId = profile?['team_id'] as String?;
-    final branchId = ref.read(selectedBranchIdProvider);
-    if (teamId == null || branchId == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Select a branch first.')));
-      return;
-    }
-    final mb = row['medicine_batches'] as Map<String, dynamic>?;
-    final batchId = mb?['id'] as String?;
-    if (batchId == null || batchId.isEmpty) return;
-    final medicineName =
-        ((mb?['medicines'] as Map<String, dynamic>?)?['name'] as String?) ??
-        'Medicine';
-    final batchNo = (mb?['batch_no'] as String?) ?? '';
-    final qtyOnHand = (row['qty_base_unit'] as num?) ?? 0;
-    final payload = await showDialog<({bool isReduce, num qty, String reason})>(
-      context: context,
-      builder: (ctx) {
-        final qtyCtl = TextEditingController();
-        final reasonCtl = TextEditingController();
-        final formKey = GlobalKey<FormState>();
-        var isReduce = !canIncreaseStock;
-        return StatefulBuilder(
-          builder: (context, setLocalState) => AlertDialog(
-            title: const Text('Adjust stock'),
-            content: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    medicineName,
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Batch ${batchNo.isEmpty ? "—" : batchNo} · on hand $qtyOnHand',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 10),
-                  if (canIncreaseStock)
-                    SegmentedButton<bool>(
-                      showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment<bool>(value: false, label: Text('Add')),
-                        ButtonSegment<bool>(value: true, label: Text('Reduce')),
-                      ],
-                      selected: {isReduce},
-                      onSelectionChanged: (next) {
-                        setLocalState(() => isReduce = next.first);
-                      },
-                    )
-                  else
-                    Text(
-                      'Stock-in additions are limited to owners and admins. '
-                      'Record a reduction only.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: qtyCtl,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                        RegExp(r'^\d*\.?\d{0,2}$'),
-                      ),
-                    ],
-                    decoration: const InputDecoration(
-                      labelText: 'Quantity',
-                      hintText: 'Enter amount',
-                    ),
-                    validator: (value) {
-                      final qty = num.tryParse((value ?? '').trim());
-                      if (qty == null || qty <= 0) {
-                        return 'Enter quantity greater than 0';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  TextFormField(
-                    controller: reasonCtl,
-                    decoration: InputDecoration(
-                      labelText: 'Reason',
-                      hintText: isReduce
-                          ? 'e.g. damaged, correction'
-                          : 'e.g. restock, correction',
-                    ),
-                    validator: (value) =>
-                        (value == null || value.trim().isEmpty)
-                        ? 'Enter reason'
-                        : null,
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  if (formKey.currentState?.validate() != true) return;
-                  final qty = num.parse(qtyCtl.text.trim());
-                  Navigator.pop(ctx, (
-                    isReduce: isReduce,
-                    qty: qty,
-                    reason: reasonCtl.text.trim(),
-                  ));
-                },
-                child: const Text('Apply'),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-    if (!mounted || payload == null) return;
-    if (!canIncreaseStock && !payload.isReduce) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Only owners and admins can add stock.')),
-      );
-      return;
-    }
-    setState(() => _adjustingBatchId = batchId);
-    try {
-      await Supabase.instance.client.rpc(
-        'apply_stock_movement',
-        params: {
-          'p_team_id': teamId,
-          'p_branch_id': branchId,
-          'p_batch_id': batchId,
-          'p_type': 'adjustment',
-          'p_qty': payload.isReduce ? -payload.qty : payload.qty,
-          'p_reason': payload.reason,
-          'p_ref_type': 'adjustment',
-          'p_ref_id': null,
-        },
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            payload.isReduce
-                ? 'Reduced stock by ${payload.qty}.'
-                : 'Added stock by ${payload.qty}.',
-          ),
-        ),
-      );
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(userFacingError(e))));
-    } finally {
-      if (mounted) {
-        setState(() => _adjustingBatchId = null);
-      }
-    }
-  }
-
-  Future<void> _safePush(String route, {bool reloadAfter = false}) async {
-    if (_isNavigating || !mounted) return;
-    setState(() => _isNavigating = true);
-    try {
-      await context.push(route);
-      if (reloadAfter && mounted) {
-        await _load();
-      }
-    } finally {
-      if (mounted) setState(() => _isNavigating = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     ref.listen(selectedBranchIdProvider, (previous, next) => _load());
-    final cs = Theme.of(context).colorScheme;
     final role =
         ref.watch(pharmacyProfileProvider).asData?.value?['role'] as String?;
     final canAddStockIn = canAddStockInForRole(role);
@@ -449,345 +221,126 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
             .whereType<Map<String, String>>()
             .toList() ??
         const <Map<String, String>>[];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-          child: Row(
-            children: [
-              if (canAddStockIn)
-                FilledButton.tonalIcon(
-                  onPressed: _isNavigating
-                      ? null
-                      : () =>
-                            _safePush('/pharmacy/stock-in', reloadAfter: true),
-                  icon: const Icon(Icons.add_box_outlined, size: 18),
-                  label: const Text('Stock in'),
-                ),
-              const Spacer(),
-              PopupMenuButton<String>(
-                tooltip: 'More actions',
-                onSelected: (value) async {
-                  switch (value) {
-                    case 'many_lines':
-                      await _safePush('/pharmacy/stock-in?tab=bulk');
-                    case 'history':
-                      await _safePush('/pharmacy/stock-movements');
-                    case 'csv':
-                      await _exportCsv();
-                  }
-                },
-                itemBuilder: (context) => [
-                  if (canAddStockIn)
-                    const PopupMenuItem<String>(
-                      value: 'many_lines',
-                      child: ListTile(
-                        dense: true,
-                        leading: Icon(Icons.playlist_add_outlined),
-                        title: Text('Many lines'),
-                      ),
-                    ),
-                  const PopupMenuItem<String>(
-                    value: 'history',
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.swap_vert_rounded),
-                      title: Text('Stock history'),
-                    ),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'csv',
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.ios_share_outlined),
-                      title: Text(kIsWeb ? 'Copy CSV' : 'Export CSV'),
-                    ),
-                  ),
-                ],
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8),
-                  child: Row(
-                    children: [
-                      Icon(Icons.more_horiz_rounded),
-                      SizedBox(width: 2),
-                      Text('More'),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _error != null
-              ? AppErrorState(message: _error!, onRetry: _load)
-              : _rows.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('No stock rows yet'),
-                      const SizedBox(height: 8),
-                      if (canAddStockIn)
-                        FilledButton(
-                          onPressed: () async {
-                            await context.push('/pharmacy/stock-in');
-                            if (mounted) _load();
-                          },
-                          child: const Text('Add stock'),
-                        )
-                      else
-                        Text(
-                          'Ask a team owner or admin to receive inventory.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: cs.onSurfaceVariant),
-                        ),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: cs.surfaceContainerHighest.withValues(
-                              alpha: 0.2,
-                            ),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: cs.outlineVariant),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(10),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                TextField(
-                                  decoration: InputDecoration(
-                                    hintText: 'Search medicine or batch',
-                                    prefixIcon: const Icon(
-                                      Icons.search_rounded,
-                                    ),
-                                    filled: true,
-                                    fillColor: cs.surface,
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(
-                                        color: cs.outlineVariant,
-                                      ),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(
-                                        color: cs.outlineVariant,
-                                      ),
-                                    ),
-                                  ),
-                                  onChanged: (value) =>
-                                      setState(() => _query = value),
-                                ),
-                                const SizedBox(height: 8),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        'Showing ${_displayRows.length} rows',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: cs.onSurfaceVariant,
-                                            ),
-                                      ),
-                                    ),
-                                    ActionChip(
-                                      label: Text(
-                                        _sortByQtyDesc
-                                            ? 'Qty: high to low'
-                                            : 'Qty: low to high',
-                                      ),
-                                      avatar: Icon(
-                                        _sortByQtyDesc
-                                            ? Icons.arrow_downward_rounded
-                                            : Icons.arrow_upward_rounded,
-                                        size: 16,
-                                      ),
-                                      onPressed: () => setState(
-                                        () => _sortByQtyDesc = !_sortByQtyDesc,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                if (categoryOptions.isNotEmpty) ...[
-                                  const SizedBox(height: 8),
-                                  ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    title: const Text('Categories'),
-                                    subtitle: Text(
-                                      _categoryFilterKeys.isEmpty
-                                          ? 'All categories'
-                                          : '${_categoryFilterKeys.length} selected',
-                                    ),
-                                    trailing: const Icon(
-                                      Icons.checklist_rounded,
-                                    ),
-                                    onTap: () async {
-                                      final selected = await _pickCategoryIds(
-                                        categoryOptions,
-                                        _categoryFilterKeys,
-                                      );
-                                      if (selected == null) return;
-                                      setState(() {
-                                        _categoryFilterKeys
-                                          ..clear()
-                                          ..addAll(selected);
-                                      });
-                                    },
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                          itemCount: _displayRows.length,
-                          itemBuilder: (context, i) {
-                            final r = _displayRows[i];
-                            final qty = r['qty_base_unit'];
-                            final mb =
-                                r['medicine_batches'] as Map<String, dynamic>?;
-                            final med =
-                                mb?['medicines'] as Map<String, dynamic>?;
-                            final name = med?['name'] as String? ?? '';
-                            final batch = mb?['batch_no'] as String? ?? '';
-                            final exp = mb?['expiry_date'] as String? ?? '';
-                            final batchId = mb?['id'] as String?;
-                            final busy =
-                                batchId != null && _adjustingBatchId == batchId;
-                            return Column(
-                              children: [
-                                ListTile(
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 2,
-                                  ),
-                                  title: Text(
-                                    name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  subtitle: Text(
-                                    'Batch ${batch.isEmpty ? "—" : batch} · exp ${formatDdMmYyyy(exp)}',
-                                  ),
-                                  trailing: Text(
-                                    busy ? '...' : '$qty',
-                                    style: TextStyle(
-                                      color: busy
-                                          ? cs.onSurfaceVariant
-                                          : cs.primary,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  onTap: busy
-                                      ? null
-                                      : () => _openQuickAdjust(r),
-                                ),
-                                Divider(
-                                  height: 1,
-                                  color: cs.outlineVariant.withValues(
-                                    alpha: 0.5,
-                                  ),
-                                ),
-                              ],
+    return _loading
+        ? const Center(child: CircularProgressIndicator())
+        : _error != null
+        ? AppErrorState(message: _error!, onRetry: _load)
+        : RefreshIndicator(
+            onRefresh: _load,
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: PharmacyHubFilterSection(
+                    searchHint: 'Search medicine or batch',
+                    onSearchChanged: (value) => setState(() => _query = value),
+                    countLabel:
+                        'Showing ${_displayRows.length} of ${_rows.length} batches',
+                    sortDescending: _sortByQtyDesc,
+                    onToggleSort: () =>
+                        setState(() => _sortByQtyDesc = !_sortByQtyDesc),
+                    categorySelectedCount: categoryOptions.isEmpty
+                        ? null
+                        : _categoryFilterKeys.length,
+                    onPickCategories: categoryOptions.isEmpty
+                        ? null
+                        : () async {
+                            final selected = await _pickCategoryIds(
+                              categoryOptions,
+                              _categoryFilterKeys,
                             );
+                            if (selected == null) return;
+                            setState(() {
+                              _categoryFilterKeys
+                                ..clear()
+                                ..addAll(selected);
+                            });
                           },
-                        ),
-                      ),
-                    ],
                   ),
                 ),
-        ),
-      ],
-    );
+                if (_rows.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _StockHubEmptyState(
+                      icon: Icons.inventory_2_outlined,
+                      title: 'No stock yet',
+                      message: canAddStockIn
+                          ? 'Receive inventory with stock in.'
+                          : 'Ask a team owner or admin to receive inventory.',
+                      actionLabel: canAddStockIn ? 'Stock in' : null,
+                      onAction: canAddStockIn
+                          ? () async {
+                              await context.push('/pharmacy/stock-in');
+                              if (mounted) _load();
+                            }
+                          : null,
+                    ),
+                  )
+                else if (_displayRows.isEmpty)
+                  const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _StockHubEmptyState(
+                      icon: Icons.search_off_rounded,
+                      title: 'No matches',
+                      message: 'Try a different search or category filter.',
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    padding: pharmacyHubListPadding(context, bottom: 88),
+                    sliver: SliverList.builder(
+                      itemCount: _displayRows.length,
+                      itemBuilder: (context, i) {
+                        final r = _displayRows[i];
+                        final qty = r['qty_base_unit'];
+                        final mb =
+                            r['medicine_batches'] as Map<String, dynamic>?;
+                        final med = mb?['medicines'] as Map<String, dynamic>?;
+                        final name = med?['name'] as String? ?? '';
+                        final batch = mb?['batch_no'] as String? ?? '';
+                        final exp = mb?['expiry_date'] as String? ?? '';
+                        return PharmacyHubListRow(
+                          icon: _stockExpiryIsNear(exp)
+                              ? Icons.schedule_rounded
+                              : Icons.inventory_2_outlined,
+                          borderColor: _stockExpiryIsNear(exp)
+                              ? Theme.of(context).colorScheme.tertiary
+                                  .withValues(alpha: 0.5)
+                              : null,
+                          title: name,
+                          subtitle:
+                              'Batch ${batch.isEmpty ? "—" : batch} · exp ${formatDdMmYyyy(exp)}',
+                          trailing: Text(
+                            '$qty',
+                            style: context.layoutDensity
+                                .listTitleStyle(Theme.of(context).textTheme)
+                                ?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: Theme.of(context).colorScheme.primary,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          );
   }
 
   Future<Set<String>?> _pickCategoryIds(
     List<Map<String, String>> options,
     Set<String> selected,
   ) async {
-    return showModalBottomSheet<Set<String>>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        final temp = Set<String>.from(selected);
-        return StatefulBuilder(
-          builder: (context, setModalState) => SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ListTile(
-                  title: const Text('Select categories'),
-                  trailing: TextButton(
-                    onPressed: () => setModalState(temp.clear),
-                    child: const Text('Clear'),
-                  ),
-                ),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      for (final option in options)
-                        CheckboxListTile(
-                          value: temp.contains(option['id']),
-                          title: Text(option['name'] ?? ''),
-                          onChanged: (checked) {
-                            setModalState(() {
-                              final id = option['id'];
-                              if (id == null) return;
-                              if (checked == true) {
-                                temp.add(id);
-                              } else {
-                                temp.remove(id);
-                              }
-                            });
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: const Text('Cancel'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: () => Navigator.pop(ctx, temp),
-                          child: const Text('Apply'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    return showPharmacyCategoryFilterSheet(
+      context,
+      selected: selected,
+      categories: options
+          .map((o) => {'id': o['id'], 'name': o['name']})
+          .toList(),
     );
   }
 }
@@ -803,6 +356,19 @@ class _LowStockPanelState extends ConsumerState<_LowStockPanel> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _rows = [];
+  String _query = '';
+
+  List<Map<String, dynamic>> get _displayRows {
+    if (_query.trim().isEmpty) return _rows;
+    final q = _query.trim().toLowerCase();
+    return _rows.where((r) {
+      final mb = r['medicine_batches'] as Map<String, dynamic>?;
+      final med = mb?['medicines'] as Map<String, dynamic>?;
+      final name = (med?['name'] as String? ?? '').toLowerCase();
+      final batch = (mb?['batch_no'] as String? ?? '').toLowerCase();
+      return name.contains(q) || batch.contains(q);
+    }).toList();
+  }
 
   @override
   void initState() {
@@ -866,54 +432,174 @@ class _LowStockPanelState extends ConsumerState<_LowStockPanel> {
     final role =
         ref.watch(pharmacyProfileProvider).asData?.value?['role'] as String?;
     final canAddStockIn = canAddStockInForRole(role);
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_error != null) {
-      return AppErrorState(message: _error!, onRetry: _load);
-    }
-    if (_rows.isEmpty) {
-      return const Center(child: Text('No batches at or below reorder level'));
-    }
-    return Column(
-      children: [
-        Align(
-          alignment: AlignmentDirectional.centerEnd,
-          child: IconButton(
-            tooltip: 'Refresh',
-            onPressed: _load,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ),
-        Expanded(
-          child: RefreshIndicator(
+    return _loading
+        ? const Center(child: CircularProgressIndicator())
+        : _error != null
+        ? AppErrorState(message: _error!, onRetry: _load)
+        : RefreshIndicator(
             onRefresh: _load,
-            child: ListView.builder(
-              itemCount: _rows.length,
-              itemBuilder: (context, i) {
-                final r = _rows[i];
-                final mb = r['medicine_batches'] as Map<String, dynamic>?;
-                final med = mb?['medicines'] as Map<String, dynamic>?;
-                final name = med?['name'] as String? ?? '';
-                final reorder = med?['reorder_level'];
-                final batch = mb?['batch_no'] as String? ?? '';
-                final exp = mb?['expiry_date'] as String? ?? '';
-                final qty = r['qty_base_unit'];
-                return ListTile(
-                  title: Text(name),
-                  subtitle: Text(
-                    'Batch $batch · exp ${formatDdMmYyyy(exp)} · reorder ≤ $reorder',
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: PharmacyHubFilterSection(
+                    searchHint: 'Search medicine or batch',
+                    onSearchChanged: (value) => setState(() => _query = value),
+                    countLabel:
+                        'Showing ${_displayRows.length} of ${_rows.length} low stock',
                   ),
-                  trailing: Text('$qty'),
-                  onTap: canAddStockIn
-                      ? () => context.push('/pharmacy/stock-in')
-                      : null,
-                );
-              },
+                ),
+                if (_rows.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _StockHubEmptyState(
+                      icon: Icons.check_circle_outline_rounded,
+                      title: 'All stocked',
+                      message: 'No batches at or below reorder level.',
+                      iconColor: Theme.of(context).colorScheme.primary,
+                    ),
+                  )
+                else if (_displayRows.isEmpty)
+                  const SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _StockHubEmptyState(
+                      icon: Icons.search_off_rounded,
+                      title: 'No matches',
+                      message: 'Try a different search term.',
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    padding: pharmacyHubListPadding(context, bottom: 88),
+                    sliver: SliverList.builder(
+                      itemCount: _displayRows.length,
+                      itemBuilder: (context, i) {
+                        final r = _displayRows[i];
+                        final mb = r['medicine_batches'] as Map<String, dynamic>?;
+                        final med = mb?['medicines'] as Map<String, dynamic>?;
+                        final name = med?['name'] as String? ?? '';
+                        final reorder = med?['reorder_level'];
+                        final batch = mb?['batch_no'] as String? ?? '';
+                        final exp = mb?['expiry_date'] as String? ?? '';
+                        final qty = r['qty_base_unit'];
+                        return PharmacyHubListRow(
+                          icon: Icons.warning_amber_rounded,
+                          iconColor: Theme.of(context).colorScheme.error
+                              .withValues(alpha: 0.9),
+                          borderColor: Theme.of(context)
+                              .colorScheme
+                              .error
+                              .withValues(alpha: 0.45),
+                          title: name,
+                          subtitle:
+                              'Batch ${batch.isEmpty ? "—" : batch} · exp ${formatDdMmYyyy(exp)} · reorder ≤ $reorder',
+                          subtitleMaxLines: 2,
+                          onTap: canAddStockIn
+                              ? () => context.push('/pharmacy/stock-in')
+                              : null,
+                          trailing: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '$qty',
+                                style: context.layoutDensity
+                                    .listTitleStyle(
+                                      Theme.of(context).textTheme,
+                                    )
+                                    ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color:
+                                      Theme.of(context).colorScheme.error,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                              if (canAddStockIn)
+                                Icon(
+                                  Icons.chevron_right_rounded,
+                                  size: context.layoutDensity.listIconSize,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
             ),
-          ),
+          );
+  }
+}
+
+class _StockHubEmptyState extends StatelessWidget {
+  const _StockHubEmptyState({
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+    this.iconColor,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  final Color? iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 48,
+              color: iconColor ?? cs.onSurfaceVariant.withValues(alpha: 0.75),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: t.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: t.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: onAction,
+                icon: const Icon(Icons.add_box_outlined, size: 18),
+                label: Text(actionLabel!),
+              ),
+            ],
+          ],
         ),
-      ],
+      ),
     );
   }
+}
+
+bool _stockExpiryIsNear(String? expiry, {int withinDays = 30}) {
+  final dt = DateTime.tryParse(expiry ?? '');
+  if (dt == null) return false;
+  return dt.difference(DateTime.now()).inDays <= withinDays;
 }

@@ -10,6 +10,7 @@ import '../../core/forms/form_validators.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/widgets/app_feedback.dart';
 import '../../core/widgets/form_error_banner.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 
 class EditStaffPage extends ConsumerStatefulWidget {
   const EditStaffPage({super.key, required this.staffId});
@@ -319,7 +320,7 @@ class _EditStaffPageState extends ConsumerState<EditStaffPage> {
     }
     if (_error != null && _teamId == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Edit staff')),
+        appBar: pharmacyPageAppBar(context, title: 'Edit staff'),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -329,9 +330,9 @@ class _EditStaffPageState extends ConsumerState<EditStaffPage> {
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Edit staff')),
+      appBar: pharmacyPageAppBar(context, title: 'Edit staff'),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         child: Form(
           key: _formKey,
           child: ListView(

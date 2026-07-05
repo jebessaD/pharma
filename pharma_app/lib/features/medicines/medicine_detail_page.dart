@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/medicine_category_catalog.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/utils/date_formatters.dart';
+import '../../core/utils/etb_amount_display.dart';
 import '../../core/widgets/app_error_state.dart';
-import '../../core/widgets/slash_dd_mm_yyyy_input.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
+import 'batch_edit_sheet.dart';
+import 'stock_in_helpers.dart';
 
 class MedicineDetailPage extends ConsumerStatefulWidget {
   const MedicineDetailPage({super.key, required this.medicineId});
@@ -22,31 +26,13 @@ class MedicineDetailPage extends ConsumerStatefulWidget {
 class _MedicineDetailPageState extends ConsumerState<MedicineDetailPage> {
   Map<String, dynamic>? _medicine;
   List<Map<String, dynamic>> _batches = [];
-  List<Map<String, dynamic>> _conversions = [];
   bool _loading = true;
-  bool _savingCore = false;
   String? _error;
-  final _coreFormKey = GlobalKey<FormState>();
-  final _nameCtl = TextEditingController();
-  final _manualCodeCtl = TextEditingController();
-  final _genericCtl = TextEditingController();
-  final _purchasePriceCtl = TextEditingController();
-  final _sellingPriceCtl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     Future.microtask(_load);
-  }
-
-  @override
-  void dispose() {
-    _nameCtl.dispose();
-    _manualCodeCtl.dispose();
-    _genericCtl.dispose();
-    _purchasePriceCtl.dispose();
-    _sellingPriceCtl.dispose();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -68,29 +54,33 @@ class _MedicineDetailPageState extends ConsumerState<MedicineDetailPage> {
           .single();
       final batches = await Supabase.instance.client
           .from('medicine_batches')
-          .select()
+          .select(
+            'id, batch_no, expiry_date, unit_cost_base, sell_price_base, '
+            'stock_balances(qty_base_unit)',
+          )
           .eq('medicine_id', widget.medicineId)
           .eq('branch_id', branchId)
           .order('expiry_date');
-      final conv = await Supabase.instance.client
-          .from('unit_conversions')
-          .select()
-          .eq('medicine_id', widget.medicineId);
       setState(() {
         _medicine = Map<String, dynamic>.from(m);
         _batches = List<Map<String, dynamic>>.from(batches as List);
-        _conversions = List<Map<String, dynamic>>.from(conv as List);
-        _nameCtl.text = '${_medicine?['name'] ?? ''}';
-        _manualCodeCtl.text = '${_medicine?['manual_code'] ?? ''}';
-        _genericCtl.text = '${_medicine?['generic_name'] ?? ''}';
-        _purchasePriceCtl.text = '${_medicine?['purchase_price'] ?? ''}';
-        _sellingPriceCtl.text = '${_medicine?['selling_price'] ?? ''}';
       });
     } catch (e) {
       setState(() => _error = userFacingError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  num _qtyForBatch(Map<String, dynamic> batch) {
+    final balances = batch['stock_balances'];
+    if (balances is List && balances.isNotEmpty) {
+      return (balances.first['qty_base_unit'] as num?) ?? 0;
+    }
+    if (balances is Map) {
+      return (balances['qty_base_unit'] as num?) ?? 0;
+    }
+    return (batch['quantity_in_base_unit'] as num?) ?? 0;
   }
 
   Future<void> _addBatch() async {
@@ -101,236 +91,190 @@ class _MedicineDetailPageState extends ConsumerState<MedicineDetailPage> {
       setState(() => _error = 'Select a branch in the app bar');
       return;
     }
-    final payload = await _showAddBatchDialog();
+    final medicine = _medicine;
+    if (medicine == null) return;
+    final payload = await showAddBatchSheet(
+      context: context,
+      defaultBuy: medicine['purchase_price'] as num?,
+      defaultSell: medicine['selling_price'] as num?,
+    );
     if (!context.mounted || payload == null) return;
     try {
-      await Supabase.instance.client.from('medicine_batches').insert({
-        'team_id': teamId,
-        'branch_id': branchId,
-        'medicine_id': widget.medicineId,
-        'batch_no': (payload.batchNo == null || payload.batchNo!.trim().isEmpty)
-            ? null
-            : payload.batchNo!.trim(),
-        'expiry_date': payload.expiry,
-        'quantity_in_base_unit': 0,
-      });
+      if (payload.qty != null && payload.qty! > 0) {
+        await stockInNewBatch(
+          client: Supabase.instance.client,
+          teamId: teamId,
+          branchId: branchId,
+          medicineId: widget.medicineId,
+          batchNo: payload.batchNo,
+          expiryIso: payload.expiryIso,
+          qty: payload.qty!,
+          unitCost: payload.unitCost,
+          sellPrice: payload.sellPrice,
+          refType: 'manual_batch_initial',
+          reason: 'manual_batch_initial',
+        );
+      } else {
+        await Supabase.instance.client.from('medicine_batches').insert({
+          'team_id': teamId,
+          'branch_id': branchId,
+          'medicine_id': widget.medicineId,
+          'batch_no': payload.batchNo,
+          'expiry_date': payload.expiryIso,
+          'quantity_in_base_unit': 0,
+          'unit_cost_base': payload.unitCost,
+          'sell_price_base': payload.sellPrice,
+        });
+      }
       await _load();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(userFacingError(e))));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(userFacingError(e))),
+        );
       }
     }
   }
 
-  Future<void> _addConversion() async {
+  Future<void> _editBatch(Map<String, dynamic> batch) async {
     final profile = ref.read(pharmacyProfileProvider).value;
     final teamId = profile?['team_id'] as String?;
-    if (teamId == null) return;
-    final payload = await _showAddConversionDialog();
-    if (!context.mounted || payload == null) return;
-    try {
-      await Supabase.instance.client.from('unit_conversions').insert({
-        'team_id': teamId,
-        'medicine_id': widget.medicineId,
-        'from_unit': payload.fromUnit,
-        'to_unit': payload.toUnit,
-        'multiplier': payload.multiplier,
-      });
-      await _load();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(userFacingError(e))));
-      }
-    }
-  }
-
-  Future<void> _saveCoreDetails() async {
-    if (_coreFormKey.currentState?.validate() != true) return;
     final branchId = ref.read(selectedBranchIdProvider);
-    if (branchId == null) {
-      setState(() => _error = 'Select a branch first.');
-      return;
-    }
-    setState(() => _savingCore = true);
-    try {
-      final codeRaw = _manualCodeCtl.text.trim();
-      await Supabase.instance.client
-          .from('medicines')
-          .update({
-            'name': _nameCtl.text.trim(),
-            'manual_code': codeRaw.isEmpty ? null : codeRaw,
-            'generic_name': _genericCtl.text.trim().isEmpty
-                ? null
-                : _genericCtl.text.trim(),
-            'purchase_price': num.parse(_purchasePriceCtl.text.trim()),
-            'selling_price': num.parse(_sellingPriceCtl.text.trim()),
-          })
-          .eq('id', widget.medicineId)
-          .eq('branch_id', branchId);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Medicine details updated')),
-      );
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(userFacingError(e))));
-    } finally {
-      if (mounted) setState(() => _savingCore = false);
-    }
+    if (teamId == null || branchId == null) return;
+    final batchId = batch['id'] as String?;
+    if (batchId == null) return;
+    final saved = await showBatchEditSheet(
+      context: context,
+      batch: BatchRowData(
+        batchId: batchId,
+        batchNo: batch['batch_no'] as String? ?? '',
+        expiryIso: batch['expiry_date'] as String? ?? '',
+        qtyOnHand: _qtyForBatch(batch),
+        unitCost: batch['unit_cost_base'] as num?,
+        sellPrice: batch['sell_price_base'] as num?,
+      ),
+      teamId: teamId,
+      branchId: branchId,
+      viewerRole: profile?['role'] as String?,
+    );
+    if (saved == true && mounted) await _load();
   }
 
-  Future<({String? batchNo, String expiry})?> _showAddBatchDialog() async {
-    final batchCtl = TextEditingController();
-    final expiryCtl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    final value = await showDialog<({String? batchNo, String expiry})>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add batch'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: batchCtl,
-                decoration: const InputDecoration(
-                  labelText: 'Batch number (optional)',
-                ),
-                autofocus: true,
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: expiryCtl,
-                keyboardType: TextInputType.number,
-                inputFormatters: [SlashDdMmYyyyInputFormatter()],
-                decoration: slashDdMmYyyyInputDecoration(
-                  context,
-                  label: 'Expiry',
-                ),
-                validator: (value) => slashDdMmYyyyExpiryError(
-                  value ?? '',
-                  DateTime(
-                    DateTime.now().year,
-                    DateTime.now().month,
-                    DateTime.now().day,
+  Future<void> _openEdit() async {
+    await context.push('/pharmacy/medicines/${widget.medicineId}/edit');
+    if (mounted) await _load();
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    final m = _medicine!;
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final name = m['name'] as String? ?? 'Medicine';
+    final generic = m['generic_name'] as String?;
+    final code = m['manual_code'] as String?;
+    final category = medicineCategoryLabel(m['category_key'] as String?);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: t.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (generic != null && generic.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          generic,
+                          style: t.textTheme.bodyMedium?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                      if (code != null && code.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text('Code: $code', style: t.textTheme.bodySmall),
+                      ],
+                      if (category.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(category, style: t.textTheme.bodySmall),
+                      ],
+                    ],
                   ),
                 ),
+                FilledButton.tonalIcon(
+                  onPressed: _openEdit,
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text('Edit'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBatchCard(BuildContext context, Map<String, dynamic> batch) {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final batchNo = (batch['batch_no'] as String?)?.trim() ?? '';
+    final label = batchNo.isEmpty ? 'No batch number' : batchNo;
+    final qty = _qtyForBatch(batch);
+    final buy = batch['unit_cost_base'] as num?;
+    final sell = batch['sell_price_base'] as num?;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: () => _editBatch(batch),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, style: t.textTheme.titleSmall),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Exp ${formatDdMmYyyy(batch['expiry_date'])} · Qty $qty',
+                      style: t.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                    if (buy != null || sell != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        [
+                          if (buy != null) 'Buy ${formatEtbAmountFixed2(buy)}',
+                          if (sell != null) 'Sell ${formatEtbAmountFixed2(sell)}',
+                        ].join(' · '),
+                        style: t.textTheme.labelMedium,
+                      ),
+                    ],
+                  ],
+                ),
               ),
+              Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (formKey.currentState?.validate() != true) return;
-              final iso = slashDdMmYyyyToIso(expiryCtl.text.trim());
-              if (iso == null) return;
-              Navigator.pop(ctx, (
-                batchNo: batchCtl.text.trim().isEmpty
-                    ? null
-                    : batchCtl.text.trim(),
-                expiry: iso,
-              ));
-            },
-            child: const Text('Add'),
-          ),
-        ],
       ),
     );
-    return value;
-  }
-
-  Future<({String fromUnit, String toUnit, num multiplier})?>
-  _showAddConversionDialog() async {
-    final fromCtl = TextEditingController();
-    final toCtl = TextEditingController();
-    final multiplierCtl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    final value =
-        await showDialog<({String fromUnit, String toUnit, num multiplier})>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Add conversion'),
-            content: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: fromCtl,
-                    decoration: const InputDecoration(labelText: 'From unit'),
-                    autofocus: true,
-                    validator: (value) =>
-                        (value == null || value.trim().isEmpty)
-                        ? 'Enter from unit'
-                        : null,
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: toCtl,
-                    decoration: const InputDecoration(labelText: 'To unit'),
-                    validator: (value) =>
-                        (value == null || value.trim().isEmpty)
-                        ? 'Enter to unit'
-                        : null,
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: multiplierCtl,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                        RegExp(r'^\d*\.?\d{0,4}$'),
-                      ),
-                    ],
-                    decoration: const InputDecoration(
-                      labelText: 'Multiplier (> 0)',
-                    ),
-                    validator: (value) {
-                      final parsed = num.tryParse((value ?? '').trim());
-                      if (parsed == null || parsed <= 0) {
-                        return 'Enter a multiplier greater than 0';
-                      }
-                      return null;
-                    },
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  if (formKey.currentState?.validate() != true) return;
-                  Navigator.pop(ctx, (
-                    fromUnit: fromCtl.text.trim(),
-                    toUnit: toCtl.text.trim(),
-                    multiplier: num.parse(multiplierCtl.text.trim()),
-                  ));
-                },
-                child: const Text('Add'),
-              ),
-            ],
-          ),
-        );
-    return value;
   }
 
   @override
@@ -340,119 +284,24 @@ class _MedicineDetailPageState extends ConsumerState<MedicineDetailPage> {
     }
     if (_error != null || _medicine == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Medicine')),
+        appBar: pharmacyPageAppBar(context, title: 'Medicine'),
         body: AppErrorState(
           message: _error ?? 'This medicine was not found.',
-          onRetry: () {
-            _load();
-          },
+          onRetry: _load,
         ),
       );
     }
+    final name = _medicine!['name'] as String? ?? 'Medicine';
     return Scaffold(
-      appBar: AppBar(title: Text(_nameCtl.text.trim().isEmpty ? 'Medicine' : _nameCtl.text.trim())),
+      appBar: pharmacyPageAppBar(context, title: name),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text(
-            'Medicine details',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 10),
-          Form(
-            key: _coreFormKey,
-            child: Column(
-              children: [
-                TextFormField(
-                  controller: _nameCtl,
-                  decoration: const InputDecoration(labelText: 'Name'),
-                  validator: (v) => (v == null || v.trim().isEmpty)
-                      ? 'Name is required'
-                      : null,
-                ),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _manualCodeCtl,
-                  decoration: const InputDecoration(
-                    labelText: 'Manual code (optional)',
-                    helperText: 'Unique per branch when set',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _genericCtl,
-                  decoration: const InputDecoration(labelText: 'Generic'),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: _purchasePriceCtl,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                            RegExp(r'^\d*\.?\d{0,2}$'),
-                          ),
-                        ],
-                        decoration: const InputDecoration(labelText: 'Buy price'),
-                        validator: (value) {
-                          final parsed = num.tryParse((value ?? '').trim());
-                          if (parsed == null || parsed < 0) {
-                            return 'Invalid buy';
-                          }
-                          return null;
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextFormField(
-                        controller: _sellingPriceCtl,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                            RegExp(r'^\d*\.?\d{0,2}$'),
-                          ),
-                        ],
-                        decoration: const InputDecoration(labelText: 'Sell price'),
-                        validator: (value) {
-                          final parsed = num.tryParse((value ?? '').trim());
-                          if (parsed == null || parsed <= 0) {
-                            return 'Invalid sell';
-                          }
-                          return null;
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.icon(
-                    onPressed: _savingCore ? null : _saveCoreDetails,
-                    icon: _savingCore
-                        ? const SizedBox(
-                            height: 14,
-                            width: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_outlined),
-                    label: const Text('Save details'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(),
+          _buildHeader(context),
+          const SizedBox(height: 16),
           Row(
             children: [
-              Text('Batches', style: Theme.of(context).textTheme.titleMedium),
+              Text('Stock batches', style: Theme.of(context).textTheme.titleMedium),
               const Spacer(),
               TextButton.icon(
                 onPressed: _addBatch,
@@ -461,44 +310,16 @@ class _MedicineDetailPageState extends ConsumerState<MedicineDetailPage> {
               ),
             ],
           ),
+          const SizedBox(height: 6),
           if (_batches.isEmpty)
-            const Text('No batches for selected branch.')
+            Text(
+              'No batches yet. Add one to stock in.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            )
           else
-            ..._batches.map(
-              (b) => ListTile(
-                dense: true,
-                title: Text(b['batch_no'] as String? ?? ''),
-                subtitle: Text(
-                  'Exp ${formatDdMmYyyy(b['expiry_date'])} · qty ${b['quantity_in_base_unit']}',
-                ),
-              ),
-            ),
-          const Divider(),
-          Row(
-            children: [
-              Text(
-                'Unit conversions',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: _addConversion,
-                icon: const Icon(Icons.add),
-                label: const Text('Add'),
-              ),
-            ],
-          ),
-          if (_conversions.isEmpty)
-            const Text('None')
-          else
-            ..._conversions.map(
-              (u) => ListTile(
-                dense: true,
-                title: Text(
-                  '${u['from_unit']} → ${u['to_unit']} × ${u['multiplier']}',
-                ),
-              ),
-            ),
+            ..._batches.map((b) => _buildBatchCard(context, b)),
         ],
       ),
     );

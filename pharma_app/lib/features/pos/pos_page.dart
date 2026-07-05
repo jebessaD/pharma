@@ -7,12 +7,14 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
-import '../../core/utils/etb_amount_display.dart';
+import '../../core/layout/layout_density.dart';
 import '../../core/providers/branch_change_guard_provider.dart';
 import '../../core/providers/connectivity_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/providers/sync_status_provider.dart';
+import '../../core/review/app_review_prompter.dart';
+import '../../core/utils/etb_amount_display.dart';
 import '../medicines/medicine_search_bar.dart';
 import '../medicines/scan/medicine_lookup_resolver.dart';
 import '../medicines/scan/medicine_scan_controller.dart';
@@ -22,6 +24,8 @@ import 'offline/pos_offline_providers.dart';
 import 'pos_sale_expiry.dart';
 import 'receipt_download_share.dart';
 import 'receipt_image_bytes.dart';
+import 'recent_sales_panel.dart';
+import 'recent_sales_repository.dart';
 import 'sale_receipt_text.dart';
 
 String _posQtyDisplay(num q) {
@@ -48,6 +52,8 @@ class _PosCartLine {
   _PosCartLine({
     required this.medicineId,
     required this.medicineName,
+    required this.genericName,
+    required this.country,
     required this.manualCode,
     required num listPricePerBase,
     required this.batchesWithQty,
@@ -57,6 +63,8 @@ class _PosCartLine {
 
   final String medicineId;
   final String medicineName;
+  final String genericName;
+  final String country;
   final String manualCode;
   final num _medicineSellPrice;
   final List<Map<String, dynamic>> batchesWithQty;
@@ -126,6 +134,8 @@ class _PosPageState extends ConsumerState<PosPage> {
   String _paymentMethod = 'cash';
   final _referenceNo = TextEditingController();
   final _discountCtl = TextEditingController();
+  late final FocusNode _discountFocus;
+  late final FocusNode _referenceFocus;
   String? _activeBranchId;
   Timer? _searchDebounce;
   final LayerLink _posSearchLayerLink = LayerLink();
@@ -159,7 +169,7 @@ class _PosPageState extends ConsumerState<PosPage> {
         }
         final broad = snap.medicines.where((m) {
           final s =
-              '${m['manual_code']} ${m['barcode']} ${m['name']} ${m['generic_name']}'
+              '${m['manual_code']} ${m['barcode']} ${m['name']} ${m['generic_name']} ${medicineDetailParts(m).join(' ')}'
                   .toLowerCase();
           return s.contains(q);
         }).toList();
@@ -187,11 +197,15 @@ class _PosPageState extends ConsumerState<PosPage> {
         }
         final rows = await Supabase.instance.client
             .from('medicines')
-            .select('id,name,manual_code,generic_name,selling_price,barcode')
+            .select(
+              'id,name,manual_code,generic_name,selling_price,barcode,country',
+            )
             .eq('team_id', teamId)
             .eq('branch_id', branchId)
             .eq('is_active', true)
-            .or('name.ilike.%$q%,manual_code.ilike.%$q%,barcode.ilike.%$q%')
+            .or(
+              'name.ilike.%$q%,generic_name.ilike.%$q%,manual_code.ilike.%$q%,barcode.ilike.%$q%,country.ilike.%$q%',
+            )
             .limit(24);
         if (!mounted || _searchCtl.text.trim() != raw) return;
 
@@ -258,6 +272,10 @@ class _PosPageState extends ConsumerState<PosPage> {
   @override
   void initState() {
     super.initState();
+    _discountFocus = FocusNode();
+    _referenceFocus = FocusNode();
+    _discountFocus.addListener(_onCheckoutFocusChanged);
+    _referenceFocus.addListener(_onCheckoutFocusChanged);
     _branchChangeGuard = ref.read(branchChangeGuardProvider.notifier);
     _searchCtl.addListener(_onSearchCtlChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -278,7 +296,9 @@ class _PosPageState extends ConsumerState<PosPage> {
     try {
       final meds = await Supabase.instance.client
           .from('medicines')
-          .select('id,name,manual_code,generic_name,selling_price,barcode')
+          .select(
+            'id,name,manual_code,generic_name,selling_price,barcode,country',
+          )
           .eq('team_id', teamId)
           .eq('branch_id', branchId)
           .eq('is_active', true)
@@ -304,10 +324,28 @@ class _PosPageState extends ConsumerState<PosPage> {
     }
   }
 
+  void _onCheckoutFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _dismissKeyboard() {
+    _discountFocus.unfocus();
+    _referenceFocus.unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
+    SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+  }
+
+  bool get _checkoutFieldFocused =>
+      _discountFocus.hasFocus || _referenceFocus.hasFocus;
+
   @override
   void dispose() {
     _searchDebounce?.cancel();
     _searchCtl.removeListener(_onSearchCtlChanged);
+    _discountFocus.removeListener(_onCheckoutFocusChanged);
+    _referenceFocus.removeListener(_onCheckoutFocusChanged);
+    _discountFocus.dispose();
+    _referenceFocus.dispose();
     for (final line in _lines) {
       line.dispose();
     }
@@ -436,11 +474,7 @@ class _PosPageState extends ConsumerState<PosPage> {
       _syncDirtyState();
       if (next <= prev && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Quantity capped at on-hand stock ($maxB).',
-            ),
-          ),
+          SnackBar(content: Text('Quantity capped at on-hand stock ($maxB).')),
         );
       }
       return true;
@@ -593,6 +627,8 @@ class _PosPageState extends ConsumerState<PosPage> {
     final line = _PosCartLine(
       medicineId: medicineId,
       medicineName: medicine['name'] as String? ?? 'Medicine',
+      genericName: medicine['generic_name'] as String? ?? '',
+      country: medicine['country'] as String? ?? '',
       manualCode: medicine['manual_code'] as String? ?? '',
       listPricePerBase: sell,
       batchesWithQty: withQty,
@@ -724,6 +760,8 @@ class _PosPageState extends ConsumerState<PosPage> {
       final id = await ref
           .read(posSyncServiceProvider)
           .syncSingleQueuedSale(queued, isOnline: isOnline);
+      if (!mounted) return;
+      _dismissKeyboard();
       setState(() {
         _lines.clear();
         _paymentMethod = 'cash';
@@ -742,7 +780,15 @@ class _PosPageState extends ConsumerState<PosPage> {
               'Sale saved on this device. The server did not confirm yet — tap Sync now or wait for automatic retry.';
         }
         if (id != null) {
+          ref.read(recentSalesRefreshTickProvider.notifier).bump();
           await _showPostSaleReceiptSheet(saleId: id, completionBanner: msg);
+          if (mounted) {
+            unawaited(
+              ref
+                  .read(appReviewPrompterProvider)
+                  .maybeRequestReview(AppReviewMoment.saleCompleted),
+            );
+          }
         } else {
           ScaffoldMessenger.of(
             context,
@@ -1038,6 +1084,136 @@ class _PosPageState extends ConsumerState<PosPage> {
     _adjustQty(_lines[idx], delta);
   }
 
+  double _checkoutBarReserve(bool compact) {
+    var h = compact ? 152.0 : 176.0;
+    if (_paymentMethod == 'mobile_banking') {
+      h += compact ? 52.0 : 56.0;
+    }
+    return h;
+  }
+
+  Widget _buildCheckoutBar(
+    BuildContext context,
+    ThemeData t, {
+    required bool compact,
+  }) {
+    final pad = compact ? 6.0 : 8.0;
+
+    return Material(
+      elevation: 4,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(pad, pad, pad, pad),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Subtotal: ${formatEtbAmountFixed2(_cartSubtotal)} ETB',
+                textAlign: TextAlign.right,
+                style: compact ? t.textTheme.bodySmall : null,
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _discountCtl,
+                      focusNode: _discountFocus,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: 'Discount (ETB)',
+                        isDense: true,
+                        contentPadding: compact
+                            ? const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              )
+                            : null,
+                      ),
+                      onChanged: (_) {
+                        setState(() {});
+                        _syncDirtyState();
+                      },
+                    ),
+                  ),
+                  SizedBox(width: compact ? 10 : 12),
+                  Expanded(
+                    child: Text(
+                      'Total: ${formatEtbAmountFixed2(_cartTotal)} ETB',
+                      textAlign: TextAlign.right,
+                      style: compact
+                          ? t.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            )
+                          : t.textTheme.titleMedium,
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: compact ? 4 : 6),
+              SegmentedButton<String>(
+                style: compact
+                    ? ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      )
+                    : null,
+                segments: const [
+                  ButtonSegment<String>(
+                    value: 'cash',
+                    label: Text('Cash'),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'mobile_banking',
+                    label: Text('Mobile'),
+                  ),
+                ],
+                selected: {_paymentMethod},
+                onSelectionChanged: (selection) {
+                  setState(() => _paymentMethod = selection.first);
+                  _syncDirtyState();
+                },
+              ),
+              if (_paymentMethod == 'mobile_banking') ...[
+                SizedBox(height: compact ? 4 : 6),
+                TextField(
+                  controller: _referenceNo,
+                  focusNode: _referenceFocus,
+                  decoration: const InputDecoration(
+                    labelText: 'Mobile payment ref (optional)',
+                    isDense: true,
+                  ),
+                  onChanged: (_) => _syncDirtyState(),
+                ),
+              ],
+              SizedBox(height: compact ? 6 : 8),
+              FilledButton(
+                style: compact
+                    ? FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      )
+                    : null,
+                onPressed: (_checkoutLoading || _lines.isEmpty)
+                    ? null
+                    : _checkout,
+                child: _checkoutLoading
+                    ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Finish sale'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen<String?>(selectedBranchIdProvider, (prev, next) {
@@ -1117,11 +1293,40 @@ class _PosPageState extends ConsumerState<PosPage> {
           },
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final searchResultsMaxHeight = (constraints.maxHeight * 0.35)
-                  .clamp(120.0, 280.0);
-              return Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
+              final mq = MediaQuery.of(context);
+              final density = LayoutDensityData.resolve(
+                size: Size(constraints.maxWidth, constraints.maxHeight),
+                textScaler: mq.textScaler,
+              );
+              final compact = density.posLikeCompact(
+                Size(constraints.maxWidth, constraints.maxHeight),
+              );
+              final pagePad = compact ? 8.0 : 12.0;
+              final searchResultsMaxHeight = (constraints.maxHeight * (compact ? 0.28 : 0.35))
+                  .clamp(compact ? 100.0 : 120.0, compact ? 220.0 : 280.0);
+              final searchActive = _searchMatches.isNotEmpty ||
+                  _searchCtl.text.trim().isNotEmpty;
+              final keyboardInset = mq.viewInsets.bottom;
+              final checkoutReserve =
+                  searchActive ? 0.0 : _checkoutBarReserve(compact);
+              final liftCheckoutBar =
+                  _checkoutFieldFocused && keyboardInset > 0;
+              final cartKeyboardPad =
+                  keyboardInset > 0 && !liftCheckoutBar ? keyboardInset : 0.0;
+              return Scaffold(
+                resizeToAvoidBottomInset: false,
+                backgroundColor: Colors.transparent,
+                body: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        pagePad,
+                        pagePad,
+                        pagePad,
+                        pagePad + checkoutReserve,
+                      ),
+                      child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     if (!isOnline || pendingCount > 0)
@@ -1154,6 +1359,12 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                 .read(posSyncServiceProvider)
                                                 .syncPending(isOnline: true);
                                             _invalidatePosOutboxCounts();
+                                            ref
+                                                .read(
+                                                  recentSalesRefreshTickProvider
+                                                      .notifier,
+                                                )
+                                                .bump();
                                           }
                                         : null,
                                     child: const Text('Sync now'),
@@ -1249,24 +1460,21 @@ class _PosPageState extends ConsumerState<PosPage> {
                                           final expiredOnly =
                                               m[kPosExpiredStockOnlyKey] ==
                                               true;
-                                          return ListTile(
-                                            dense: true,
-                                            title: Text(
-                                              m['name'] as String? ?? '',
-                                            ),
-                                            subtitle: Text(
-                                              expiredOnly
-                                                  ? 'Expired stock only — cannot sell'
-                                                  : '${m['manual_code'] ?? ''} ${m['barcode'] ?? ''}',
-                                              style: expiredOnly
-                                                  ? t.textTheme.bodySmall
-                                                        ?.copyWith(
-                                                          color: t
-                                                              .colorScheme
-                                                              .error,
-                                                        )
-                                                  : null,
-                                            ),
+                                          return MedicineSearchResultTile(
+                                            row: m,
+                                            leadingMessage: expiredOnly
+                                                ? 'Expired stock only — cannot sell'
+                                                : null,
+                                            leadingStyle: expiredOnly
+                                                ? t.textTheme.bodySmall
+                                                      ?.copyWith(
+                                                        color: t
+                                                            .colorScheme
+                                                            .error,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      )
+                                                : null,
                                             onTap: () {
                                               if (expiredOnly) {
                                                 ScaffoldMessenger.of(
@@ -1305,17 +1513,22 @@ class _PosPageState extends ConsumerState<PosPage> {
                             ),
                         ],
                       ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Expanded(
                       child: Visibility(
-                        visible: _searchMatches.isEmpty,
+                        visible: !searchActive,
                         maintainState: true,
-                        maintainSize: true,
+                        maintainSize: false,
                         maintainAnimation: true,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Text('Quick cart', style: t.textTheme.titleMedium),
+                            Text(
+                              'Quick cart',
+                              style: compact
+                                  ? t.textTheme.titleSmall
+                                  : t.textTheme.titleMedium,
+                            ),
                             if (_error != null)
                               Padding(
                                 padding: const EdgeInsets.symmetric(
@@ -1328,30 +1541,40 @@ class _PosPageState extends ConsumerState<PosPage> {
                               ),
                             Expanded(
                               child: _lines.isEmpty
-                                  ? Align(
-                                      alignment: Alignment.topCenter,
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(top: 8),
-                                        child: Text(
+                                  ? ListView(
+                                      physics:
+                                          const AlwaysScrollableScrollPhysics(),
+                                      padding: const EdgeInsets.only(
+                                        top: 8,
+                                        bottom: 12,
+                                      ),
+                                      children: [
+                                        Text(
                                           'Search a medicine to add a line.\nDefault batch = nearest expiry; change below.',
                                           textAlign: TextAlign.center,
-                                          style: t.textTheme.bodyMedium
-                                              ?.copyWith(
-                                                color: t
-                                                    .colorScheme
-                                                    .onSurfaceVariant,
-                                              ),
+                                          style: t.textTheme.bodySmall?.copyWith(
+                                            color: t.colorScheme.onSurfaceVariant,
+                                          ),
                                         ),
-                                      ),
+                                        SizedBox(height: compact ? 10 : 16),
+                                        RecentSalesPanel(
+                                          limit: compact ? 2 : 3,
+                                          compact: true,
+                                        ),
+                                      ],
                                     )
                                   : Scrollbar(
                                       controller: _cartScrollController,
                                       child: ListView.builder(
                                         controller: _cartScrollController,
+                                        keyboardDismissBehavior:
+                                            ScrollViewKeyboardDismissBehavior
+                                                .onDrag,
                                         physics:
                                             const AlwaysScrollableScrollPhysics(),
-                                        padding: const EdgeInsets.only(
-                                          bottom: 12,
+                                        padding: EdgeInsets.only(
+                                          bottom: (compact ? 8 : 12) +
+                                              cartKeyboardPad,
                                         ),
                                         itemCount: _lines.length,
                                         itemBuilder: (context, i) {
@@ -1384,9 +1607,24 @@ class _PosPageState extends ConsumerState<PosPage> {
                                               batchExpiryIsBeforeToday(
                                                 selBatch['expiry_date'],
                                               );
+                                          final cardRadius =
+                                              compact ? 10.0 : 12.0;
+                                          final cardPadH =
+                                              compact ? 10.0 : 14.0;
+                                          final cardPadV =
+                                              compact ? 6.0 : 10.0;
+                                          final sectionGap =
+                                              compact ? 6.0 : 10.0;
+                                          final rowGap = compact ? 6.0 : 8.0;
+                                          final fieldRadius =
+                                              compact ? 8.0 : 10.0;
+                                          final iconBtnSize =
+                                              compact ? 32.0 : 40.0;
+                                          final stepperIconSize =
+                                              compact ? 18.0 : 20.0;
                                           return Card(
-                                            margin: const EdgeInsets.only(
-                                              bottom: 6,
+                                            margin: EdgeInsets.only(
+                                              bottom: compact ? 4 : 6,
                                             ),
                                             elevation: 0,
                                             shadowColor: Colors.transparent,
@@ -1401,7 +1639,9 @@ class _PosPageState extends ConsumerState<PosPage> {
                                             ),
                                             shape: RoundedRectangleBorder(
                                               borderRadius:
-                                                  BorderRadius.circular(12),
+                                                  BorderRadius.circular(
+                                                    cardRadius,
+                                                  ),
                                               side: BorderSide(
                                                 color: i == _selectedLineIndex
                                                     ? t.colorScheme.primary
@@ -1424,7 +1664,9 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                 () => _selectedLineIndex = i,
                                               ),
                                               borderRadius:
-                                                  BorderRadius.circular(12),
+                                                  BorderRadius.circular(
+                                                    cardRadius,
+                                                  ),
                                               splashColor: t.colorScheme.primary
                                                   .withValues(alpha: 0.08),
                                               highlightColor: t
@@ -1433,9 +1675,9 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                   .withValues(alpha: 0.04),
                                               child: Padding(
                                                 padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 14,
-                                                      vertical: 10,
+                                                    EdgeInsets.symmetric(
+                                                      horizontal: cardPadH,
+                                                      vertical: cardPadV,
                                                     ),
                                                 child: Column(
                                                   crossAxisAlignment:
@@ -1455,9 +1697,11 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                             children: [
                                                               Text(
                                                                 line.medicineName,
-                                                                style: t
-                                                                    .textTheme
-                                                                    .titleSmall
+                                                                style: (compact
+                                                                        ? t.textTheme.labelLarge
+                                                                        : t
+                                                                            .textTheme
+                                                                            .titleSmall)
                                                                     ?.copyWith(
                                                                       fontWeight:
                                                                           FontWeight
@@ -1465,7 +1709,9 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                       letterSpacing:
                                                                           -0.2,
                                                                       height:
-                                                                          1.2,
+                                                                          compact
+                                                                          ? 1.15
+                                                                          : 1.2,
                                                                     ),
                                                                 maxLines: 2,
                                                                 overflow:
@@ -1475,23 +1721,63 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                               const SizedBox(
                                                                 height: 2,
                                                               ),
-                                                              Text(
-                                                                line.manualCode,
-                                                                style: t
-                                                                    .textTheme
-                                                                    .labelSmall
-                                                                    ?.copyWith(
-                                                                      color: t
-                                                                          .colorScheme
-                                                                          .onSurfaceVariant
-                                                                          .withValues(
-                                                                            alpha:
-                                                                                0.88,
-                                                                          ),
-                                                                      letterSpacing:
-                                                                          0.2,
-                                                                    ),
-                                                              ),
+                                                              if (line
+                                                                  .genericName
+                                                                  .isNotEmpty)
+                                                                Text(
+                                                                  line.genericName,
+                                                                  maxLines: 1,
+                                                                  overflow:
+                                                                      TextOverflow
+                                                                          .ellipsis,
+                                                                  style: (compact
+                                                                          ? t.textTheme.labelSmall
+                                                                          : t
+                                                                              .textTheme
+                                                                              .bodySmall)
+                                                                      ?.copyWith(
+                                                                        color: t
+                                                                            .colorScheme
+                                                                            .onSurfaceVariant,
+                                                                        height:
+                                                                            1.15,
+                                                                      ),
+                                                                ),
+                                                              if (line
+                                                                      .manualCode
+                                                                      .isNotEmpty ||
+                                                                  line
+                                                                      .country
+                                                                      .isNotEmpty) ...[
+                                                                const SizedBox(
+                                                                  height: 2,
+                                                                ),
+                                                                Text(
+                                                                  [
+                                                                    if (line
+                                                                        .manualCode
+                                                                        .isNotEmpty)
+                                                                      line.manualCode,
+                                                                    if (line
+                                                                        .country
+                                                                        .isNotEmpty)
+                                                                      line.country,
+                                                                  ].join(' · '),
+                                                                  maxLines: 1,
+                                                                  overflow:
+                                                                      TextOverflow
+                                                                          .ellipsis,
+                                                                  style: t.textTheme.labelSmall?.copyWith(
+                                                                    color: t
+                                                                        .colorScheme
+                                                                        .onSurfaceVariant
+                                                                        .withValues(
+                                                                          alpha:
+                                                                              0.82,
+                                                                        ),
+                                                                  ),
+                                                                ),
+                                                              ],
                                                             ],
                                                           ),
                                                         ),
@@ -1507,9 +1793,11 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                           children: [
                                                             ConstrainedBox(
                                                               constraints:
-                                                                  const BoxConstraints(
+                                                                  BoxConstraints(
                                                                     minWidth:
-                                                                        72,
+                                                                        compact
+                                                                        ? 60
+                                                                        : 72,
                                                                   ),
                                                               child: Text(
                                                                 lineTotal ==
@@ -1521,7 +1809,12 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                 textAlign:
                                                                     TextAlign
                                                                         .center,
-                                                                style: t.textTheme.titleSmall?.copyWith(
+                                                                style: (compact
+                                                                        ? t.textTheme.labelLarge
+                                                                        : t
+                                                                            .textTheme
+                                                                            .titleSmall)
+                                                                    ?.copyWith(
                                                                   fontWeight:
                                                                       FontWeight
                                                                           .w600,
@@ -1539,11 +1832,11 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                             ),
                                                             IconButton(
                                                               constraints:
-                                                                  const BoxConstraints(
+                                                                  BoxConstraints(
                                                                     minWidth:
-                                                                        40,
+                                                                        iconBtnSize,
                                                                     minHeight:
-                                                                        40,
+                                                                        iconBtnSize,
                                                                   ),
                                                               padding:
                                                                   EdgeInsets
@@ -1560,9 +1853,12 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                           0.08,
                                                                     ),
                                                               ),
-                                                              icon: const Icon(
+                                                              icon: Icon(
                                                                 Icons
                                                                     .delete_outline,
+                                                                size: compact
+                                                                    ? 18
+                                                                    : 24,
                                                               ),
                                                               onPressed: () =>
                                                                   _removeLine(
@@ -1574,7 +1870,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                       ],
                                                     ),
                                                     if (lineBatchExpired) ...[
-                                                      const SizedBox(height: 6),
+                                                      SizedBox(height: compact ? 4 : 6),
                                                       DecoratedBox(
                                                         decoration: BoxDecoration(
                                                           color: t
@@ -1582,13 +1878,13 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                               .errorContainer,
                                                           borderRadius:
                                                               BorderRadius.circular(
-                                                                8,
+                                                                compact ? 6 : 8,
                                                               ),
                                                         ),
                                                         child: Padding(
                                                           padding:
-                                                              const EdgeInsets.all(
-                                                                8,
+                                                              EdgeInsets.all(
+                                                                compact ? 6 : 8,
                                                               ),
                                                           child: Text(
                                                             'This batch is expired and cannot be sold. Change batch or remove this line.',
@@ -1604,7 +1900,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                         ),
                                                       ),
                                                     ],
-                                                    const SizedBox(height: 10),
+                                                    SizedBox(height: sectionGap),
                                                     Row(
                                                       crossAxisAlignment:
                                                           CrossAxisAlignment
@@ -1621,7 +1917,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                   ),
                                                               borderRadius:
                                                                   BorderRadius.circular(
-                                                                    10,
+                                                                    fieldRadius,
                                                                   ),
                                                               border: Border.all(
                                                                 color: t
@@ -1635,10 +1931,15 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                             ),
                                                             child: Padding(
                                                               padding:
-                                                                  const EdgeInsets.symmetric(
+                                                                  EdgeInsets.symmetric(
                                                                     horizontal:
-                                                                        10,
-                                                                    vertical: 2,
+                                                                        compact
+                                                                        ? 8
+                                                                        : 10,
+                                                                    vertical:
+                                                                        compact
+                                                                        ? 0
+                                                                        : 2,
                                                                   ),
                                                               child: DropdownButtonHideUnderline(
                                                                 child: DropdownButton<String>(
@@ -1719,8 +2020,8 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                             ),
                                                           ),
                                                         ),
-                                                        const SizedBox(
-                                                          width: 8,
+                                                        SizedBox(
+                                                          width: compact ? 6 : 8,
                                                         ),
                                                         Expanded(
                                                           child: TextField(
@@ -1737,9 +2038,9 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                 ),
                                                               ),
                                                             ],
-                                                            style: t
-                                                                .textTheme
-                                                                .bodyMedium,
+                                                            style: compact
+                                                                ? t.textTheme.bodySmall
+                                                                : t.textTheme.bodyMedium,
                                                             decoration: InputDecoration(
                                                               labelText:
                                                                   'Unit price',
@@ -1754,13 +2055,13 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                               border: OutlineInputBorder(
                                                                 borderRadius:
                                                                     BorderRadius.circular(
-                                                                      10,
+                                                                      fieldRadius,
                                                                     ),
                                                               ),
                                                               enabledBorder: OutlineInputBorder(
                                                                 borderRadius:
                                                                     BorderRadius.circular(
-                                                                      10,
+                                                                      fieldRadius,
                                                                     ),
                                                                 borderSide: BorderSide(
                                                                   color: t
@@ -1775,7 +2076,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                               focusedBorder: OutlineInputBorder(
                                                                 borderRadius:
                                                                     BorderRadius.circular(
-                                                                      10,
+                                                                      fieldRadius,
                                                                     ),
                                                                 borderSide: BorderSide(
                                                                   color: t
@@ -1789,11 +2090,15 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                 ),
                                                               ),
                                                               contentPadding:
-                                                                  const EdgeInsets.symmetric(
+                                                                  EdgeInsets.symmetric(
                                                                     horizontal:
-                                                                        12,
+                                                                        compact
+                                                                        ? 10
+                                                                        : 12,
                                                                     vertical:
-                                                                        10,
+                                                                        compact
+                                                                        ? 6
+                                                                        : 10,
                                                                   ),
                                                             ),
                                                             onChanged: (value) {
@@ -1902,7 +2207,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                         ),
                                                       ],
                                                     ),
-                                                    const SizedBox(height: 8),
+                                                    SizedBox(height: rowGap),
                                                     Row(
                                                       crossAxisAlignment:
                                                           CrossAxisAlignment
@@ -1919,7 +2224,10 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                             children: [
                                                               Text(
                                                                 'Quantity',
-                                                                style: t.textTheme.labelMedium?.copyWith(
+                                                                style: (compact
+                                                                        ? t.textTheme.labelSmall
+                                                                        : t.textTheme.labelMedium)
+                                                                    ?.copyWith(
                                                                   color: t
                                                                       .colorScheme
                                                                       .onSurfaceVariant
@@ -1949,6 +2257,10 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                           ),
                                                                       height:
                                                                           1.25,
+                                                                      fontSize:
+                                                                          compact
+                                                                          ? 10
+                                                                          : null,
                                                                     ),
                                                               ),
                                                             ],
@@ -1969,9 +2281,9 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                     VisualDensity
                                                                         .compact,
                                                                 minimumSize:
-                                                                    const Size(
-                                                                      40,
-                                                                      40,
+                                                                    Size(
+                                                                      iconBtnSize,
+                                                                      iconBtnSize,
                                                                     ),
                                                                 padding:
                                                                     EdgeInsets
@@ -1980,13 +2292,16 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                     MaterialTapTargetSize
                                                                         .shrinkWrap,
                                                               ),
-                                                              icon: const Icon(
+                                                              icon: Icon(
                                                                 Icons.remove,
-                                                                size: 20,
+                                                                size:
+                                                                    stepperIconSize,
                                                               ),
                                                             ),
                                                             SizedBox(
-                                                              width: 80,
+                                                              width: compact
+                                                                  ? 64
+                                                                  : 80,
                                                               child: TextField(
                                                                 controller: line
                                                                     .qtyController,
@@ -2000,9 +2315,11 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                 textAlign:
                                                                     TextAlign
                                                                         .center,
-                                                                style: t
-                                                                    .textTheme
-                                                                    .titleSmall
+                                                                style: (compact
+                                                                        ? t.textTheme.labelLarge
+                                                                        : t
+                                                                            .textTheme
+                                                                            .titleSmall)
                                                                     ?.copyWith(
                                                                       fontWeight:
                                                                           FontWeight
@@ -2025,13 +2342,13 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                   border: OutlineInputBorder(
                                                                     borderRadius:
                                                                         BorderRadius.circular(
-                                                                          10,
+                                                                          fieldRadius,
                                                                         ),
                                                                   ),
                                                                   enabledBorder: OutlineInputBorder(
                                                                     borderRadius:
                                                                         BorderRadius.circular(
-                                                                          10,
+                                                                          fieldRadius,
                                                                         ),
                                                                     borderSide: BorderSide(
                                                                       color: t
@@ -2046,7 +2363,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                   focusedBorder: OutlineInputBorder(
                                                                     borderRadius:
                                                                         BorderRadius.circular(
-                                                                          10,
+                                                                          fieldRadius,
                                                                         ),
                                                                     borderSide: BorderSide(
                                                                       color: t
@@ -2061,11 +2378,13 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                     ),
                                                                   ),
                                                                   contentPadding:
-                                                                      const EdgeInsets.symmetric(
+                                                                      EdgeInsets.symmetric(
                                                                         horizontal:
                                                                             8,
                                                                         vertical:
-                                                                            10,
+                                                                            compact
+                                                                            ? 8
+                                                                            : 10,
                                                                       ),
                                                                 ),
                                                                 onChanged:
@@ -2096,9 +2415,9 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                     VisualDensity
                                                                         .compact,
                                                                 minimumSize:
-                                                                    const Size(
-                                                                      40,
-                                                                      40,
+                                                                    Size(
+                                                                      iconBtnSize,
+                                                                      iconBtnSize,
                                                                     ),
                                                                 padding:
                                                                     EdgeInsets
@@ -2107,9 +2426,10 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                                     MaterialTapTargetSize
                                                                         .shrinkWrap,
                                                               ),
-                                                              icon: const Icon(
+                                                              icon: Icon(
                                                                 Icons.add,
-                                                                size: 20,
+                                                                size:
+                                                                    stepperIconSize,
                                                               ),
                                                             ),
                                                           ],
@@ -2119,18 +2439,23 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                     if (_showPriceReason(line))
                                                       Padding(
                                                         padding:
-                                                            const EdgeInsets.only(
-                                                              top: 8,
+                                                            EdgeInsets.only(
+                                                              top: compact
+                                                                  ? 6
+                                                                  : 8,
                                                             ),
                                                         child: TextField(
                                                           controller: line
                                                               .reasonController,
-                                                          decoration: const InputDecoration(
+                                                          decoration: InputDecoration(
                                                             labelText:
                                                                 'Override reason (optional)',
                                                             labelStyle:
                                                                 TextStyle(
-                                                                  fontSize: 13,
+                                                                  fontSize:
+                                                                      compact
+                                                                      ? 12
+                                                                      : 13,
                                                                 ),
 
                                                             helperText:
@@ -2139,8 +2464,13 @@ class _PosPageState extends ConsumerState<PosPage> {
                                                             contentPadding:
                                                                 EdgeInsets.symmetric(
                                                                   horizontal:
-                                                                      10,
-                                                                  vertical: 10,
+                                                                      compact
+                                                                      ? 8
+                                                                      : 10,
+                                                                  vertical:
+                                                                      compact
+                                                                      ? 8
+                                                                      : 10,
                                                                 ),
                                                           ),
                                                           onChanged: (value) {
@@ -2165,96 +2495,22 @@ class _PosPageState extends ConsumerState<PosPage> {
                         ),
                       ),
                     ),
-                    Material(
-                      elevation: 4,
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              'Subtotal: ${formatEtbAmountFixed2(_cartSubtotal)} ETB',
-                              textAlign: TextAlign.right,
-                            ),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: _discountCtl,
-                                    keyboardType:
-                                        const TextInputType.numberWithOptions(
-                                          decimal: true,
-                                        ),
-                                    decoration: const InputDecoration(
-                                      labelText: 'Discount (ETB)',
-                                      isDense: true,
-                                    ),
-                                    onChanged: (_) {
-                                      setState(() {});
-                                      _syncDirtyState();
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    'Total: ${formatEtbAmountFixed2(_cartTotal)} ETB',
-                                    textAlign: TextAlign.right,
-                                    style: t.textTheme.titleMedium,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            SegmentedButton<String>(
-                              segments: const [
-                                ButtonSegment<String>(
-                                  value: 'cash',
-                                  label: Text('Cash'),
-                                ),
-                                ButtonSegment<String>(
-                                  value: 'mobile_banking',
-                                  label: Text('Mobile'),
-                                ),
-                              ],
-                              selected: {_paymentMethod},
-                              onSelectionChanged: (selection) {
-                                setState(
-                                  () => _paymentMethod = selection.first,
-                                );
-                                _syncDirtyState();
-                              },
-                            ),
-                            if (_paymentMethod == 'mobile_banking') ...[
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: _referenceNo,
-                                decoration: const InputDecoration(
-                                  labelText: 'Mobile payment ref (optional)',
-                                  isDense: true,
-                                ),
-                                onChanged: (_) => _syncDirtyState(),
-                              ),
-                            ],
-                            const SizedBox(height: 8),
-                            FilledButton(
-                              onPressed: (_checkoutLoading || _lines.isEmpty)
-                                  ? null
-                                  : _checkout,
-                              child: _checkoutLoading
-                                  ? const SizedBox(
-                                      height: 22,
-                                      width: 22,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Text('Finish sale'),
-                            ),
-                          ],
+                  ],
+                ),
+                    ),
+                    if (!searchActive)
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 120),
+                        curve: Curves.easeOut,
+                        left: 0,
+                        right: 0,
+                        bottom: liftCheckoutBar ? keyboardInset : 0,
+                        child: _buildCheckoutBar(
+                          context,
+                          t,
+                          compact: compact,
                         ),
                       ),
-                    ),
                   ],
                 ),
               );

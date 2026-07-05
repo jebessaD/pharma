@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/layout/layout_density.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/app_error_state.dart';
+import '../../core/widgets/pharmacy_hub_list.dart';
 import '../../core/widgets/pharmacy_page_app_bar.dart';
 
 class NotificationListPage extends ConsumerStatefulWidget {
@@ -98,16 +100,13 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage> {
     try {
       await Supabase.instance.client.rpc(
         'refresh_alerts',
-        params: {
-          'p_team_id': teamId,
-          'p_branch_id': branchId,
-        },
+        params: {'p_team_id': teamId, 'p_branch_id': branchId},
       );
       await _load();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Alerts refreshed')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Alerts refreshed')));
       }
     } catch (e) {
       setState(() => _error = userFacingError(e));
@@ -123,9 +122,9 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage> {
       await _load();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(userFacingError(e))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(userFacingError(e))));
       }
     }
   }
@@ -144,9 +143,9 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage> {
       await _load();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(userFacingError(e))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(userFacingError(e))));
       }
     }
   }
@@ -170,12 +169,18 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage> {
   static Color _accentForType(String? type, ColorScheme cs) {
     switch (type) {
       case 'low_stock':
-        return cs.tertiary;
+        return cs.brightness == Brightness.dark
+            ? const Color(0xFFFBBF24)
+            : const Color(0xFFD97706);
       case 'near_expiry':
       case 'near_expiry_30':
-        return cs.secondary;
+        return cs.brightness == Brightness.dark
+            ? const Color(0xFFF59E0B)
+            : const Color(0xFFB45309);
       case 'near_expiry_90':
-        return cs.primary;
+        return cs.brightness == Brightness.dark
+            ? const Color(0xFFFBBF24)
+            : const Color(0xFFD97706);
       case 'expired':
         return cs.error;
       default:
@@ -185,46 +190,46 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<String?>(
-      selectedBranchIdProvider,
-      (previous, next) => _load(),
-    );
+    ref.listen<String?>(selectedBranchIdProvider, (previous, next) => _load());
     final t = Theme.of(context);
     final cs = t.colorScheme;
+    final density = context.layoutDensity;
 
     return Scaffold(
       backgroundColor: cs.surface,
-      appBar: pharmacyHubAppBar(
-        context,
-        title: 'Notifications',
-        actions: [
-          IconButton(
-            tooltip: 'Mark all read',
-            onPressed: _loading || _unreadCount == 0 ? null : _markAllRead,
-            icon: Badge(
-              isLabelVisible: _unreadCount > 0,
-              label: Text(
-                _unreadCount > 99 ? '99+' : '$_unreadCount',
-                style: const TextStyle(fontSize: 10),
-              ),
-              child: Icon(Icons.done_all_rounded, color: cs.onSurface),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: HubPageHeader(
+              title: 'Notifications',
+              actions: [
+                IconButton(
+                  tooltip: 'Mark all read',
+                  onPressed: _loading || _unreadCount == 0 ? null : _markAllRead,
+                  icon: Badge(
+                    isLabelVisible: _unreadCount > 0,
+                    label: Text(
+                      _unreadCount > 99 ? '99+' : '$_unreadCount',
+                      style: const TextStyle(fontSize: 10),
+                    ),
+                    child: const Icon(Icons.done_all_rounded),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh alerts',
+                  onPressed: _loading ? null : _refreshAlerts,
+                  icon: const Icon(Icons.refresh_rounded),
+                ),
+              ],
             ),
           ),
-          IconButton(
-            tooltip: 'Refresh alerts',
-            onPressed: _loading ? null : _refreshAlerts,
-            icon: Icon(Icons.refresh_rounded, color: cs.onSurface),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: _loading
+          Expanded(
+            child: _loading
           ? Center(child: CircularProgressIndicator(color: cs.primary))
           : _error != null
-          ? AppErrorState(
-              message: _error!,
-              onRetry: _load,
-            )
+          ? AppErrorState(message: _error!, onRetry: _load)
           : _rows.isEmpty
           ? _EmptyNotificationsState(colorScheme: cs, textTheme: t.textTheme)
           : RefreshIndicator(
@@ -234,80 +239,18 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
                   SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: cs.outlineVariant),
-                          color: cs.surfaceContainerHighest.withValues(
-                            alpha: 0.35,
-                          ),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Row(
-                                children: [
-                                  FilterChip(
-                                    label: const Text('Unread only'),
-                                    selected: _showUnreadOnly,
-                                    showCheckmark: false,
-                                    avatar: Icon(
-                                      Icons.mark_email_unread_outlined,
-                                      size: 18,
-                                      color: _showUnreadOnly
-                                          ? cs.onSecondaryContainer
-                                          : cs.onSurfaceVariant,
-                                    ),
-                                    onSelected: (v) =>
-                                        setState(() => _showUnreadOnly = v),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              SearchBar(
-                                hintText: 'Search title or message',
-                                leading: Icon(
-                                  Icons.search_rounded,
-                                  color: cs.onSurfaceVariant,
-                                ),
-                                trailing: [
-                                  if (_query.isNotEmpty)
-                                    IconButton(
-                                      tooltip: 'Clear',
-                                      icon: Icon(
-                                        Icons.close_rounded,
-                                        color: cs.onSurfaceVariant,
-                                      ),
-                                      onPressed: () {
-                                        _searchCtl.clear();
-                                        setState(() => _query = '');
-                                      },
-                                    ),
-                                ],
-                                controller: _searchCtl,
-                                onChanged: (v) => setState(() => _query = v),
-                                elevation: WidgetStateProperty.all(0),
-                                backgroundColor: WidgetStateProperty.all(
-                                  cs.surface.withValues(alpha: 0.95),
-                                ),
-                                side: WidgetStateProperty.all(
-                                  BorderSide(
-                                    color: cs.outline.withValues(alpha: 0.22),
-                                  ),
-                                ),
-                                shape: WidgetStateProperty.all(
-                                  RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                    child: PharmacyHubFilterSection(
+                      searchController: _searchCtl,
+                      searchHint: 'Search notifications',
+                      onSearchChanged: (v) => setState(() => _query = v),
+                      countLabel:
+                          'Showing ${_filteredRows.length} · $_unreadCount unread',
+                      countTrailing: FilterChip(
+                        label: const Text('Unread only'),
+                        selected: _showUnreadOnly,
+                        showCheckmark: false,
+                        visualDensity: VisualDensity.compact,
+                        onSelected: (v) => setState(() => _showUnreadOnly = v),
                       ),
                     ),
                   ),
@@ -350,10 +293,10 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage> {
                     )
                   else
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                      padding: pharmacyHubListPadding(context, bottom: 20),
                       sliver: SliverList.separated(
                         itemCount: _filteredRows.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        separatorBuilder: (_, _) => const SizedBox(height: 8),
                         itemBuilder: (context, i) {
                           final n = _filteredRows[i];
                           final read = n['is_read'] as bool? ?? false;
@@ -365,124 +308,130 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage> {
                               : '';
 
                           return Material(
-                            color: read
-                                ? cs.surface
-                                : cs.primaryContainer.withValues(alpha: 0.22),
+                            color: cs.surface,
                             elevation: 0,
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(12),
+                            clipBehavior: Clip.antiAlias,
                             child: InkWell(
-                              borderRadius: BorderRadius.circular(16),
                               onTap: read
                                   ? null
                                   : () => _markRead(n['id'] as String),
-                              child: Ink(
+                              child: Container(
                                 decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(16),
                                   border: Border.all(
-                                    color: read
-                                        ? cs.outlineVariant.withValues(
-                                            alpha: 0.65,
-                                          )
-                                        : accent.withValues(alpha: 0.35),
+                                    color: cs.outlineVariant.withValues(
+                                      alpha: 0.45,
+                                    ),
                                   ),
                                 ),
-                                child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    14,
-                                    14,
-                                    10,
-                                    14,
-                                  ),
+                                child: IntrinsicHeight(
                                   child: Row(
                                     crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                        CrossAxisAlignment.stretch,
                                     children: [
                                       Container(
-                                        width: 44,
-                                        height: 44,
-                                        decoration: BoxDecoration(
-                                          color: accent.withValues(alpha: 0.14),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                        ),
-                                        child: Icon(
-                                          _iconForType(type),
-                                          color: accent,
-                                          size: 24,
-                                        ),
+                                        width: read ? 0 : 4,
+                                        color: accent,
                                       ),
-                                      const SizedBox(width: 14),
                                       Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Expanded(
-                                                  child: Text(
-                                                    n['title'] as String? ?? '',
-                                                    style: t.textTheme
-                                                        .titleSmall
-                                                        ?.copyWith(
-                                                      fontWeight: read
-                                                          ? FontWeight.w600
-                                                          : FontWeight.w700,
-                                                      letterSpacing: -0.2,
+                                        child: Padding(
+                                          padding: EdgeInsets.fromLTRB(
+                                            density.listCardPaddingH,
+                                            density.listCardPaddingV,
+                                            density.listCardPaddingH,
+                                            density.listCardPaddingV,
+                                          ),
+                                          child: Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Container(
+                                                width: density.iconBoxSize,
+                                                height: density.iconBoxSize,
+                                                decoration: BoxDecoration(
+                                                  color: cs
+                                                      .surfaceContainerHighest
+                                                      .withValues(alpha: 0.7),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                    density.v(
+                                                      compact: 10,
+                                                      standard: 10,
+                                                      comfortable: 12,
                                                     ),
                                                   ),
                                                 ),
-                                                if (!read)
-                                                  Container(
-                                                    width: 8,
-                                                    height: 8,
-                                                    margin: const EdgeInsets
-                                                        .only(
-                                                      top: 6,
-                                                      left: 6,
-                                                    ),
-                                                    decoration: BoxDecoration(
-                                                      color: cs.primary,
-                                                      shape: BoxShape.circle,
-                                                    ),
+                                                child: Icon(
+                                                  _iconForType(type),
+                                                  color: accent,
+                                                  size: density.v(
+                                                    compact: 20,
+                                                    standard: 20,
+                                                    comfortable: 22,
                                                   ),
-                                              ],
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              n['message'] as String? ?? '',
-                                              style: t.textTheme.bodyMedium
-                                                  ?.copyWith(
-                                                color: cs.onSurface
-                                                    .withValues(alpha: 0.78),
-                                                height: 1.35,
+                                                ),
                                               ),
-                                            ),
-                                            const SizedBox(height: 8),
-                                            Text(
-                                              timeStr,
-                                              style: t.textTheme.labelMedium
-                                                  ?.copyWith(
-                                                color: cs.onSurfaceVariant,
+                                              SizedBox(
+                                                width: density.v(
+                                                  compact: 12,
+                                                  standard: 12,
+                                                  comfortable: 14,
+                                                ),
                                               ),
-                                            ),
-                                          ],
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      n['title'] as String? ??
+                                                          '',
+                                                      style: (density.isCompact
+                                                              ? t.textTheme
+                                                                  .titleSmall
+                                                              : t.textTheme
+                                                                  .titleMedium)
+                                                          ?.copyWith(
+                                                        fontWeight: read
+                                                            ? FontWeight.w600
+                                                            : FontWeight.w700,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    Text(
+                                                      n['message'] as String? ??
+                                                          '',
+                                                      maxLines: 2,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: (density.isCompact
+                                                              ? t.textTheme
+                                                                  .bodySmall
+                                                              : t.textTheme
+                                                                  .bodyMedium)
+                                                          ?.copyWith(
+                                                        color: cs
+                                                            .onSurfaceVariant,
+                                                        height: 1.35,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 6),
+                                                    Text(
+                                                      timeStr,
+                                                      style: t
+                                                          .textTheme.labelSmall
+                                                          ?.copyWith(
+                                                            color: cs
+                                                                .onSurfaceVariant,
+                                                          ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
-                                      if (!read)
-                                        IconButton(
-                                          tooltip: 'Mark read',
-                                          icon: Icon(
-                                            Icons.check_circle_outline_rounded,
-                                            color: cs.primary,
-                                          ),
-                                          onPressed: () => _markRead(
-                                            n['id'] as String,
-                                          ),
-                                        ),
                                     ],
                                   ),
                                 ),
@@ -495,6 +444,9 @@ class _NotificationListPageState extends ConsumerState<NotificationListPage> {
                 ],
               ),
             ),
+          ),
+        ],
+      ),
     );
   }
 }

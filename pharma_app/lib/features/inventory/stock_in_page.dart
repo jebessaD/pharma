@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
+import '../../core/medicine_catalog/medicine_catalog.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
@@ -15,6 +16,8 @@ import '../../core/providers/selected_branch_provider.dart';
 import '../../core/review/app_review_prompter.dart';
 import '../../core/roles/stock_permissions.dart';
 import '../../core/utils/refresh_alerts_silent.dart';
+import '../../core/widgets/medicine_catalog_form_fields.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 import '../../core/widgets/slash_dd_mm_yyyy_input.dart';
 import 'stock_in_row_state.dart';
 import '../medicines/scan/medicine_lookup_resolver.dart';
@@ -65,6 +68,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
   static const _guardKey = 'stock_in_page';
   static const _stockInDeniedMessage =
       'Stock-in is limited to team owners and admins.';
+  static const _medicineSelect =
+      'id, name, manual_code, barcode, generic_name, purchase_price, selling_price, subcategory, country, presentation, strength, dosage_form';
   late final TabController _tabs;
   late final BranchChangeGuard _branchGuard;
 
@@ -173,7 +178,25 @@ class _StockInPageState extends ConsumerState<StockInPage>
   );
 
   void _syncDirtyState() {
-    _branchGuard.setDirty(_guardKey, _singleDirty || _bulkDirty);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _branchGuard.setDirty(_guardKey, _singleDirty || _bulkDirty);
+    });
+  }
+
+  num? _positiveNumber(Object? value) {
+    final parsed = value is num ? value : num.tryParse('${value ?? ''}');
+    if (parsed == null || parsed <= 0) return null;
+    return parsed;
+  }
+
+  void _prefillPriceIfPositive(
+    TextEditingController controller,
+    Object? value,
+  ) {
+    if (controller.text.trim().isNotEmpty) return;
+    final parsed = _positiveNumber(value);
+    if (parsed != null) controller.text = '$parsed';
   }
 
   void _discardAll() {
@@ -237,9 +260,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
       }
       final data = await Supabase.instance.client
           .from('medicines')
-          .select(
-            'id, name, manual_code, barcode, generic_name, purchase_price, selling_price',
-          )
+          .select(_medicineSelect)
           .eq('team_id', teamId)
           .eq('branch_id', branchId)
           .eq('is_active', true)
@@ -309,14 +330,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
       final list = List<Map<String, dynamic>>.from(rows as List);
       if (list.isEmpty || !mounted) return;
       final prev = list.first;
-      if (unitCostCtl.text.trim().isEmpty) {
-        final uc = prev['unit_cost_base'];
-        if (uc != null) unitCostCtl.text = '$uc';
-      }
-      if (sellPriceCtl.text.trim().isEmpty) {
-        final sp = prev['sell_price_base'];
-        if (sp != null) sellPriceCtl.text = '$sp';
-      }
+      _prefillPriceIfPositive(unitCostCtl, prev['unit_cost_base']);
+      _prefillPriceIfPositive(sellPriceCtl, prev['sell_price_base']);
     } catch (_) {
       // Non-critical; fallback to medicine defaults in _resolvedXxx methods.
     }
@@ -346,6 +361,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
   Future<void> _submitSingle() async {
     if (!_ensureCanAddStockIn()) return;
     if (!(_singleFormKey.currentState?.validate() ?? false)) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
     final iso = slashDdMmYyyyToIso(_expiry.text);
     final expErr = slashDdMmYyyyExpiryError(_expiry.text, _today);
     if (expErr != null || iso == null) {
@@ -413,10 +429,11 @@ class _StockInPageState extends ConsumerState<StockInPage>
         },
       );
       await refreshAlertsSilent(teamId: teamId, branchId: branchId);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Saved stock line.')));
+      if (mounted && context.mounted) {
+        FocusManager.instance.primaryFocus?.unfocus();
+        messenger?.showSnackBar(
+          const SnackBar(content: Text('Saved stock line.')),
+        );
         setState(() {
           _selectedMedicineId = null;
           _batchNo.clear();
@@ -436,6 +453,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
         );
       }
     } catch (error) {
+      if (!mounted) return;
       setState(() => _error = _friendlyError(error));
     } finally {
       if (mounted) setState(() => _singleLoading = false);
@@ -516,6 +534,12 @@ class _StockInPageState extends ConsumerState<StockInPage>
       setState(() => _error = 'Category list is unavailable. Please retry.');
       return;
     }
+    List<MedicineCatalogEntry> catalog;
+    try {
+      catalog = await ref.read(medicineCatalogProvider.future);
+    } catch (_) {
+      catalog = const [];
+    }
     if (!mounted) return;
 
     final formKey = GlobalKey<FormState>();
@@ -523,9 +547,26 @@ class _StockInPageState extends ConsumerState<StockInPage>
     final generic = TextEditingController();
     final code = TextEditingController();
     final barcode = TextEditingController();
+    final subcategory = TextEditingController();
+    final country = TextEditingController();
+    final presentation = TextEditingController();
+    final strength = TextEditingController();
+    final dosageForm = TextEditingController();
     String categoryKey = categories.first['id'] as String;
     var saving = false;
     String? dialogError;
+    void applyCatalogEntry(MedicineCatalogEntry entry) {
+      applyMedicineCatalogEntry(
+        entry: entry,
+        name: name,
+        genericName: generic,
+        subcategory: subcategory,
+        country: country,
+        presentation: presentation,
+        strength: strength,
+        dosageForm: dosageForm,
+      );
+    }
 
     final created = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -542,18 +583,23 @@ class _StockInPageState extends ConsumerState<StockInPage>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        TextFormField(
+                        MedicineCatalogAutocompleteField(
                           controller: name,
-                          decoration: const InputDecoration(labelText: 'Name'),
+                          catalog: catalog,
+                          label: 'Name',
+                          onSelected: applyCatalogEntry,
                           validator: (v) =>
                               FormValidators.requiredText(v, label: 'Name'),
                         ),
                         const SizedBox(height: 10),
-                        TextFormField(
+                        MedicineCatalogAutocompleteField(
                           controller: generic,
-                          decoration: const InputDecoration(
-                            labelText: 'Generic name (optional)',
-                          ),
+                          catalog: catalog,
+                          label: 'Generic name (optional)',
+                          hintText: 'Search by generic or medicine name',
+                          displayTextForOption: (entry) =>
+                              entry.genericName ?? entry.name,
+                          onSelected: applyCatalogEntry,
                         ),
                         const SizedBox(height: 10),
                         TextFormField(
@@ -594,6 +640,14 @@ class _StockInPageState extends ConsumerState<StockInPage>
                           validator: (value) => value == null || value.isEmpty
                               ? 'Select a category'
                               : null,
+                        ),
+                        const SizedBox(height: 10),
+                        MedicineOptionalDetailsSection(
+                          subcategory: subcategory,
+                          country: country,
+                          presentation: presentation,
+                          strength: strength,
+                          dosageForm: dosageForm,
                         ),
                         if (dialogError != null) ...[
                           const SizedBox(height: 10),
@@ -644,24 +698,33 @@ class _StockInPageState extends ConsumerState<StockInPage>
                                       ? null
                                       : barcode.text.trim(),
                                   'category_key': categoryKey,
+                                  'subcategory': optionalMedicineText(
+                                    subcategory,
+                                  ),
+                                  'country': optionalMedicineText(country),
+                                  'presentation': optionalMedicineText(
+                                    presentation,
+                                  ),
+                                  'strength': optionalMedicineText(strength),
+                                  'dosage_form': optionalMedicineText(
+                                    dosageForm,
+                                  ),
                                   'purchase_price': 0,
                                   'selling_price': 0,
                                 })
-                                .select(
-                                  'id, name, manual_code, barcode, generic_name, purchase_price, selling_price',
-                                )
+                                .select(_medicineSelect)
                                 .single();
                             if (!dialogContext.mounted) return;
                             Navigator.of(
                               dialogContext,
                             ).pop(Map<String, dynamic>.from(inserted));
+                            return;
                           } catch (e) {
                             if (!dialogContext.mounted) return;
                             setDialogState(() => dialogError = mapFormError(e));
-                          } finally {
-                            if (dialogContext.mounted) {
-                              setDialogState(() => saving = false);
-                            }
+                          }
+                          if (dialogContext.mounted) {
+                            setDialogState(() => saving = false);
                           }
                         },
                   child: saving
@@ -690,23 +753,26 @@ class _StockInPageState extends ConsumerState<StockInPage>
       _lookupBulkIndex = null;
       if (target == _LookupTarget.single) {
         _selectedMedicineId = createdId;
-        final pp = created['purchase_price'];
-        if (pp != null) _singleUnitCost.text = '$pp';
-        final sp = created['selling_price'];
-        if (sp != null) _singleSellPrice.text = '$sp';
+        _prefillPriceIfPositive(_singleUnitCost, created['purchase_price']);
+        _prefillPriceIfPositive(_singleSellPrice, created['selling_price']);
       } else {
         final idx = bulkIndex ?? _activeBulkIndex;
         if (idx >= 0 && idx < _bulkLines.length) {
           _bulkLines[idx].medicineId = createdId;
-          final pp = created['purchase_price'];
-          if (pp != null) _bulkLines[idx].unitCost.text = '$pp';
-          final sp = created['selling_price'];
-          if (sp != null) _bulkLines[idx].sellPrice.text = '$sp';
+          _prefillPriceIfPositive(
+            _bulkLines[idx].unitCost,
+            created['purchase_price'],
+          );
+          _prefillPriceIfPositive(
+            _bulkLines[idx].sellPrice,
+            created['selling_price'],
+          );
           _activeBulkIndex = idx;
         }
       }
     });
     _syncDirtyState();
+    if (!mounted || !context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Medicine added. Continue stock entry.')),
     );
@@ -770,6 +836,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
       ),
     );
     if (count == null || count <= 0) return;
+    if (!mounted) return;
     setState(() {
       for (var i = 0; i < count; i++) {
         final n = _BulkLine();
@@ -805,6 +872,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
         branchId: branchId,
         query: parts[0],
       );
+      if (!mounted) return;
       if (result.state != MedicineLookupState.foundSingle) continue;
       final line = _BulkLine()
         ..medicineId = result.matches.first['id'] as String?
@@ -933,6 +1001,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
 
   Future<void> _submitBulkReadyOnly() async {
     if (!_ensureCanAddStockIn()) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
     final profile = ref.read(pharmacyProfileProvider).value;
     final teamId = profile?['team_id'] as String?;
     final branchId = ref.read(selectedBranchIdProvider);
@@ -994,8 +1063,9 @@ class _StockInPageState extends ConsumerState<StockInPage>
         params: {'p_branch_id': branchId, 'p_items': items},
       );
       await refreshAlertsSilent(teamId: teamId, branchId: branchId);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted && context.mounted) {
+        FocusManager.instance.primaryFocus?.unfocus();
+        messenger?.showSnackBar(
           SnackBar(
             content: Text(
               skipped > 0
@@ -1030,6 +1100,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
         );
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = userFacingError(e));
     } finally {
       if (mounted) setState(() => _bulkSubmitting = false);
@@ -1088,27 +1159,15 @@ class _StockInPageState extends ConsumerState<StockInPage>
     setState(() {
       if (target == _LookupTarget.single) {
         _selectedMedicineId = id;
-        if (_singleUnitCost.text.trim().isEmpty) {
-          final pp = row['purchase_price'];
-          if (pp != null) _singleUnitCost.text = '$pp';
-        }
-        if (_singleSellPrice.text.trim().isEmpty) {
-          final sp = row['selling_price'];
-          if (sp != null) _singleSellPrice.text = '$sp';
-        }
+        _prefillPriceIfPositive(_singleUnitCost, row['purchase_price']);
+        _prefillPriceIfPositive(_singleSellPrice, row['selling_price']);
       } else {
         final idx = bulkIndex ?? _activeBulkIndex;
         if (idx >= 0 && idx < _bulkLines.length) {
           final line = _bulkLines[idx];
           line.medicineId = id;
-          if (line.unitCost.text.trim().isEmpty) {
-            final pp = row['purchase_price'];
-            if (pp != null) line.unitCost.text = '$pp';
-          }
-          if (line.sellPrice.text.trim().isEmpty) {
-            final sp = row['selling_price'];
-            if (sp != null) line.sellPrice.text = '$sp';
-          }
+          _prefillPriceIfPositive(line.unitCost, row['purchase_price']);
+          _prefillPriceIfPositive(line.sellPrice, row['selling_price']);
           _activeBulkIndex = idx;
         }
       }
@@ -1196,14 +1255,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
               final id = row['id'] as String;
               setState(() {
                 _selectedMedicineId = id;
-                if (_singleUnitCost.text.trim().isEmpty) {
-                  final pp = row['purchase_price'];
-                  if (pp != null) _singleUnitCost.text = '$pp';
-                }
-                if (_singleSellPrice.text.trim().isEmpty) {
-                  final sp = row['selling_price'];
-                  if (sp != null) _singleSellPrice.text = '$sp';
-                }
+                _prefillPriceIfPositive(_singleUnitCost, row['purchase_price']);
+                _prefillPriceIfPositive(_singleSellPrice, row['selling_price']);
               });
               _syncDirtyState();
               _inheritPreviousBatchPrices(
@@ -1214,22 +1267,26 @@ class _StockInPageState extends ConsumerState<StockInPage>
             },
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              FilledButton.tonalIcon(
-                onPressed: _scanForSingle,
-                icon: const Icon(Icons.qr_code_scanner),
-                label: const Text('Scan'),
-              ),
-              const SizedBox(width: 8),
-              if (_selectedMedicineId == null && !isPharmacist)
-                OutlinedButton.icon(
-                  onPressed: () =>
-                      _showAddMedicineDialog(target: _LookupTarget.single),
-                  icon: const Icon(Icons.medication_outlined),
-                  label: const Text('Not found? Add medicine'),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: _scanForSingle,
+                  icon: const Icon(Icons.qr_code_scanner),
+                  label: const Text('Scan'),
                 ),
-            ],
+                if (_selectedMedicineId == null && !isPharmacist) ...[
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () =>
+                        _showAddMedicineDialog(target: _LookupTarget.single),
+                    icon: const Icon(Icons.medication_outlined),
+                    label: const Text('Not found? Add medicine'),
+                  ),
+                ],
+              ],
+            ),
           ),
           if (_selectedMedicineId != null) ...[
             const SizedBox(height: 8),
@@ -1538,14 +1595,14 @@ class _StockInPageState extends ConsumerState<StockInPage>
                   final id = row['id'] as String;
                   setState(() {
                     line.medicineId = id;
-                    if (line.unitCost.text.trim().isEmpty) {
-                      final pp = row['purchase_price'];
-                      if (pp != null) line.unitCost.text = '$pp';
-                    }
-                    if (line.sellPrice.text.trim().isEmpty) {
-                      final sp = row['selling_price'];
-                      if (sp != null) line.sellPrice.text = '$sp';
-                    }
+                    _prefillPriceIfPositive(
+                      line.unitCost,
+                      row['purchase_price'],
+                    );
+                    _prefillPriceIfPositive(
+                      line.sellPrice,
+                      row['selling_price'],
+                    );
                   });
                   _syncDirtyState();
                   _inheritPreviousBatchPrices(
@@ -1615,35 +1672,12 @@ class _StockInPageState extends ConsumerState<StockInPage>
                 ],
               ),
               const SizedBox(height: 8),
-              TextFormField(
-                controller: line.unitCost,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+              if (line.medicineId != null)
+                _ReadOnlyPriceStrip(
+                  purchaseCtl: line.unitCost,
+                  sellCtl: line.sellPrice,
                 ),
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}$')),
-                ],
-                decoration: const InputDecoration(
-                  labelText: 'Purchase cost (optional)',
-                  helperText: 'Inherits from last batch if blank',
-                ),
-                onChanged: (_) => setState(() {}),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: line.sellPrice,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}$')),
-                ],
-                decoration: const InputDecoration(
-                  labelText: 'Sell price (optional)',
-                  helperText: 'POS default for this batch',
-                ),
-                onChanged: (_) => setState(() {}),
-              ),
+              if (line.medicineId != null) const SizedBox(height: 8),
             ],
           ),
         ),
@@ -1658,7 +1692,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
     }
     if (_accessDenied) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Stock in')),
+        appBar: pharmacyPageAppBar(context, title: 'Stock in'),
         body: const Center(
           child: Padding(
             padding: EdgeInsets.all(24),
@@ -1670,14 +1704,9 @@ class _StockInPageState extends ConsumerState<StockInPage>
     final t = Theme.of(context);
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          'Stock in',
-          style: t.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.25,
-          ),
-        ),
+      appBar: pharmacyPageAppBar(
+        context,
+        title: 'Stock in',
         bottom: TabBar(
           controller: _tabs,
           tabs: const [
@@ -1777,40 +1806,13 @@ class _StockInPageState extends ConsumerState<StockInPage>
                             },
                           ),
                           const SizedBox(height: 10),
-                          TextFormField(
-                            controller: _singleUnitCost,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
+                          if (_selectedMedicineId != null)
+                            _ReadOnlyPriceStrip(
+                              purchaseCtl: _singleUnitCost,
+                              sellCtl: _singleSellPrice,
                             ),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.allow(
-                                RegExp(r'^\d*\.?\d{0,2}$'),
-                              ),
-                            ],
-                            decoration: const InputDecoration(
-                              labelText: 'Purchase cost (base unit)',
-                              helperText:
-                                  'Inherits from last batch; edit if this batch differs',
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          TextFormField(
-                            controller: _singleSellPrice,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.allow(
-                                RegExp(r'^\d*\.?\d{0,2}$'),
-                              ),
-                            ],
-                            decoration: const InputDecoration(
-                              labelText: 'Sell price (base unit)',
-                              helperText:
-                                  'Used as default at POS for this batch',
-                            ),
-                          ),
-                          const SizedBox(height: 18),
+                          if (_selectedMedicineId != null)
+                            const SizedBox(height: 10),
                           FilledButton.icon(
                             onPressed: _singleLoading ? null : _submitSingle,
                             icon: _singleLoading
@@ -1936,6 +1938,87 @@ class _StockInPageState extends ConsumerState<StockInPage>
               ),
             )
           : null,
+    );
+  }
+}
+
+class _ReadOnlyPriceStrip extends StatelessWidget {
+  const _ReadOnlyPriceStrip({
+    required this.purchaseCtl,
+    required this.sellCtl,
+  });
+
+  final TextEditingController purchaseCtl;
+  final TextEditingController sellCtl;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final purchase = purchaseCtl.text.trim();
+    final sell = sellCtl.text.trim();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: _ReadOnlyPriceCell(
+                label: 'Purchase',
+                value: purchase.isEmpty ? '—' : purchase,
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 28,
+              color: cs.outlineVariant.withValues(alpha: 0.45),
+            ),
+            Expanded(
+              child: _ReadOnlyPriceCell(
+                label: 'Sell price',
+                value: sell.isEmpty ? '—' : sell,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReadOnlyPriceCell extends StatelessWidget {
+  const _ReadOnlyPriceCell({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: t.textTheme.labelSmall?.copyWith(
+            color: cs.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: t.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
     );
   }
 }

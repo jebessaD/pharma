@@ -1,11 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/auth/staff_username_availability.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
 import '../../core/providers/branches_list_provider.dart';
@@ -14,6 +11,8 @@ import '../../core/widgets/app_feedback.dart';
 import '../../core/widgets/app_text_form_field.dart';
 import '../../core/widgets/form_error_banner.dart';
 import '../../core/widgets/pharmacy_hub_scaffold.dart';
+import '../staff/staff_create_form.dart';
+import '../staff/staff_credentials_dialog.dart';
 import '../staff/staff_list_page.dart';
 import 'branch_list_page.dart';
 import 'team_profile_page.dart';
@@ -22,9 +21,14 @@ enum OrganizationHubTab { profile, branches, staff }
 
 /// Admin: `/pharmacy/organization?tab=profile|branches|staff`.
 class OrganizationHubPage extends ConsumerStatefulWidget {
-  const OrganizationHubPage({super.key, required this.initialTab});
+  const OrganizationHubPage({
+    super.key,
+    required this.initialTab,
+    this.autoOpenStaffAdd = false,
+  });
 
   final OrganizationHubTab initialTab;
+  final bool autoOpenStaffAdd;
 
   @override
   ConsumerState<OrganizationHubPage> createState() =>
@@ -51,6 +55,11 @@ class _OrganizationHubPageState extends ConsumerState<OrganizationHubPage>
       initialIndex: _initialIndex,
     );
     _tabController.addListener(_onTabChanged);
+    if (widget.autoOpenStaffAdd) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showAddStaffInline(context);
+      });
+    }
   }
 
   void _onTabChanged() {
@@ -89,7 +98,7 @@ class _OrganizationHubPageState extends ConsumerState<OrganizationHubPage>
   Widget build(BuildContext context) {
     return PharmacyHubScaffold(
       title: 'Organization',
-      subtitle: 'Team, locations, and access',
+      subtitle: 'Team, branches, and access',
       tabController: _tabController,
       tabs: const [
         Tab(text: 'Profile', icon: Icon(Icons.apartment_rounded)),
@@ -345,257 +354,44 @@ class _OrganizationHubPageState extends ConsumerState<OrganizationHubPage>
       isScrollControlled: true,
       useSafeArea: true,
       builder: (sheetContext) {
-        return _OrganizationAddStaffSheet(
-          teamId: teamId,
-          branches: branches,
-          canAssignAdmin: canAssignAdmin,
-          onCreated: () {
-            if (mounted) setState(() => _staffRefreshTick++);
-          },
+        final insets = MediaQuery.of(sheetContext).viewInsets.bottom;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + insets),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Add staff',
+                  style: Theme.of(sheetContext).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                StaffCreateForm(
+                  teamId: teamId,
+                  branches: branches,
+                  canAssignAdmin: canAssignAdmin,
+                  compact: true,
+                  onCreated: (username, password) async {
+                    if (mounted) setState(() => _staffRefreshTick++);
+                    if (sheetContext.mounted) {
+                      Navigator.of(sheetContext).pop();
+                    }
+                    if (!context.mounted) return;
+                    await showStaffCredentialsDialog(
+                      context: context,
+                      username: username,
+                      password: password,
+                    );
+                    if (!context.mounted) return;
+                    AppFeedback.success(context, 'Staff user created');
+                  },
+                ),
+              ],
+            ),
+          ),
         );
       },
-    );
-  }
-}
-
-/// Owns [TextEditingController]s so they are disposed only after the modal
-/// subtree unmounts (avoids use-after-dispose when the sheet closes).
-class _OrganizationAddStaffSheet extends StatefulWidget {
-  const _OrganizationAddStaffSheet({
-    required this.teamId,
-    required this.branches,
-    required this.canAssignAdmin,
-    required this.onCreated,
-  });
-
-  final String teamId;
-  final List<Map<String, dynamic>> branches;
-  final bool canAssignAdmin;
-  final VoidCallback onCreated;
-
-  @override
-  State<_OrganizationAddStaffSheet> createState() =>
-      _OrganizationAddStaffSheetState();
-}
-
-class _OrganizationAddStaffSheetState extends State<_OrganizationAddStaffSheet> {
-  final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _fullNameCtl;
-  late final TextEditingController _usernameCtl;
-  late final TextEditingController _passwordCtl;
-  Timer? _usernameDebounce;
-  int _usernameCheckSeq = 0;
-  bool? _usernameAvailable;
-  String _role = 'pharmacist';
-  late String? _branchId;
-  String? _errorText;
-  bool _loading = false;
-  bool _obscurePassword = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _fullNameCtl = TextEditingController();
-    _usernameCtl = TextEditingController();
-    _passwordCtl = TextEditingController();
-    _branchId = widget.branches.length == 1
-        ? widget.branches.first['id'] as String
-        : null;
-  }
-
-  @override
-  void dispose() {
-    _usernameDebounce?.cancel();
-    _fullNameCtl.dispose();
-    _usernameCtl.dispose();
-    _passwordCtl.dispose();
-    super.dispose();
-  }
-
-  void _scheduleUsernameCheck(String _) {
-    _usernameDebounce?.cancel();
-    final currentText = _usernameCtl.text;
-    _usernameDebounce = Timer(const Duration(milliseconds: 400), () async {
-      final seq = ++_usernameCheckSeq;
-      final avail = await queryStaffUsernameAvailable(
-        Supabase.instance.client,
-        currentText,
-      );
-      if (!mounted || seq != _usernameCheckSeq) return;
-      setState(() => _usernameAvailable = avail);
-    });
-  }
-
-  Future<void> _submit() async {
-    if (_formKey.currentState?.validate() != true) return;
-    if (_usernameAvailable == false) return;
-    if (_branchId == null) {
-      setState(() => _errorText = 'Please assign a branch.');
-      return;
-    }
-    if (widget.teamId.isEmpty) {
-      setState(() {
-        _errorText =
-            'Your team profile is not ready yet. Re-open organization or sign in again.';
-      });
-      return;
-    }
-    setState(() {
-      _loading = true;
-      _errorText = null;
-    });
-    var closed = false;
-    try {
-      final res = await Supabase.instance.client.functions.invoke(
-        'admin-create-user',
-        body: {
-          'username': _usernameCtl.text.trim().toLowerCase(),
-          'password': _passwordCtl.text,
-          'full_name': _fullNameCtl.text.trim(),
-          'role': _role,
-          'branch_id': _branchId,
-        },
-      );
-      if (res.status >= 400) {
-        throw FunctionException(status: res.status, details: res.data);
-      }
-      if (!mounted) return;
-      widget.onCreated();
-      AppFeedback.success(context, 'Staff user created');
-      Navigator.of(context).pop();
-      closed = true;
-    } catch (e) {
-      if (mounted) setState(() => _errorText = userFacingError(e));
-    } finally {
-      if (mounted && !closed) setState(() => _loading = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final insets = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + insets),
-      child: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Add staff', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 12),
-              AppTextFormField(
-                controller: _fullNameCtl,
-                label: 'Full name',
-                validator: (v) =>
-                    FormValidators.requiredText(v, label: 'Full name'),
-              ),
-              const SizedBox(height: 12),
-              AppTextFormField(
-                controller: _usernameCtl,
-                label: 'Username',
-                textCapitalization: TextCapitalization.none,
-                onChanged: _scheduleUsernameCheck,
-                validator: (v) {
-                  final base = FormValidators.staffUsername(v);
-                  if (base != null) return base;
-                  if (_usernameAvailable == false) {
-                    return 'This username is already taken';
-                  }
-                  return null;
-                },
-              ),
-              const Text(
-                'Unique across all pharmacies (3–32 chars: letters, numbers, underscores).',
-                style: TextStyle(fontSize: 12),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _passwordCtl,
-                obscureText: _obscurePassword,
-                validator: (v) => FormValidators.passwordMinLength(v, min: 8),
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                    ),
-                    onPressed: () => setState(
-                      () => _obscurePassword = !_obscurePassword,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              InputDecorator(
-                decoration: const InputDecoration(labelText: 'Role'),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _role,
-                    isExpanded: true,
-                    items: [
-                      if (widget.canAssignAdmin)
-                        const DropdownMenuItem(
-                          value: 'admin',
-                          child: Text('Admin'),
-                        ),
-                      const DropdownMenuItem(
-                        value: 'pharmacist',
-                        child: Text('Pharmacist'),
-                      ),
-                      const DropdownMenuItem(
-                        value: 'seller',
-                        child: Text('Seller (counter)'),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) setState(() => _role = value);
-                    },
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              InputDecorator(
-                decoration: const InputDecoration(labelText: 'Branch *'),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String?>(
-                    value: _branchId,
-                    isExpanded: true,
-                    hint: const Text('Select a branch'),
-                    items: widget.branches
-                        .map(
-                          (b) => DropdownMenuItem<String?>(
-                            value: b['id'] as String,
-                            child: Text(b['name'] as String? ?? ''),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) => setState(() => _branchId = value),
-                  ),
-                ),
-              ),
-              if (_errorText != null) ...[
-                const SizedBox(height: 12),
-                FormErrorBanner(message: _errorText!),
-              ],
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _loading ? null : _submit,
-                child: _loading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Create user'),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

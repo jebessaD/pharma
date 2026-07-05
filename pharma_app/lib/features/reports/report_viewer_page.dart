@@ -1,50 +1,25 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/utils/csv_export.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/review/app_review_prompter.dart';
 import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/form_error_banner.dart';
+import 'report_date_range.dart';
+import 'report_display.dart';
+import 'report_filter_bar.dart';
 
-bool _reportCellLooksLikeUuid(String s) {
-  final t = s.trim();
-  return RegExp(
-    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
-  ).hasMatch(t);
-}
-
-bool _reportColumnKeyIsId(String key) {
-  final k = key.toLowerCase();
-  return k == 'id' || k.endsWith('_id');
-}
-
-/// On-screen report tables only; CSV export still emits raw values.
-String _reportTableCellDisplayText(String key, Object? value) {
-  final raw = value ?? '';
-  final s = '$raw'.trim();
-  if (s.isEmpty) return '';
-  if (_reportColumnKeyIsId(key) && _reportCellLooksLikeUuid(s)) {
-    return '—';
-  }
-  final k = key.toLowerCase();
-  if (k.contains('date') || k.endsWith('_at')) {
-    return formatDdMmYyyy(value);
-  }
-  return s;
-}
-
-enum _DatePreset { today, last7, last30, thisYear, custom }
+enum _DatePreset { today, last7, thisMonth, last30, thisYear, lifetime, custom }
 
 enum _TrendPreset { day, month, year }
 
@@ -58,12 +33,12 @@ class ReportViewerPage extends ConsumerStatefulWidget {
 }
 
 class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
+  static final DateTime _lifetimeFrom = DateTime(2020, 1, 1);
+
   bool _loading = false;
   String? _error;
   List<Map<String, dynamic>> _rows = [];
   String _filter = '';
-  String? _sortKey;
-  bool _sortAsc = true;
   late DateTime _from;
   late DateTime _to;
   late _DatePreset _datePreset;
@@ -78,7 +53,6 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
   String? _selectedPaymentMethod;
   final Set<String> _selectedCategoryKeys = <String>{};
   bool _overridesOnly = false;
-  bool _filtersExpanded = false;
   List<Map<String, String>> _sellerOptions = const [];
 
   bool get _isUnifiedSalesReport => widget.reportType == 'sales_unified';
@@ -168,12 +142,18 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
       case _DatePreset.last7:
         _to = today;
         _from = today.subtract(const Duration(days: 6));
+      case _DatePreset.thisMonth:
+        _to = today;
+        _from = DateTime(today.year, today.month, 1);
       case _DatePreset.last30:
         _to = today;
         _from = today.subtract(const Duration(days: 29));
       case _DatePreset.thisYear:
         _to = today;
         _from = DateTime(today.year, 1, 1);
+      case _DatePreset.lifetime:
+        _to = today;
+        _from = _dateOnly(_lifetimeFrom);
       case _DatePreset.custom:
         break;
     }
@@ -185,7 +165,7 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
     super.initState();
     _trendPreset = _TrendPreset.day;
     if (_isSalesRangeReport) {
-      _applyDatePreset(_DatePreset.today);
+      _applyDatePreset(_DatePreset.thisMonth);
     } else {
       final today = _dateOnly(DateTime.now());
       _from = today;
@@ -233,7 +213,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_pharmacistNarrowSalesDatePresets()) return;
-    if (_datePreset == _DatePreset.thisYear || _datePreset == _DatePreset.custom) {
+    if (_datePreset != _DatePreset.today &&
+        _datePreset != _DatePreset.last7 &&
+        _datePreset != _DatePreset.last30) {
       _applyDatePreset(_DatePreset.today);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _runSoon();
@@ -348,6 +330,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
             'p_category_keys': _selectedCategoryKeys.isEmpty
                 ? null
                 : _selectedCategoryKeys.toList(growable: false),
+            'p_search': null,
+            'p_limit': 500,
+            'p_offset': 0,
           },
         );
         _rows = List<Map<String, dynamic>>.from(data as List);
@@ -372,6 +357,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                 'p_category_keys': _selectedCategoryKeys.isEmpty
                     ? null
                     : _selectedCategoryKeys.toList(growable: false),
+                'p_search': null,
+                'p_limit': 500,
+                'p_offset': 0,
               },
             );
             final raw =
@@ -411,6 +399,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
                 'p_category_keys': _selectedCategoryKeys.isEmpty
                     ? null
                     : _selectedCategoryKeys.toList(growable: false),
+                'p_search': null,
+                'p_limit': 500,
+                'p_offset': 0,
               },
             );
             final raw =
@@ -493,11 +484,6 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
     } finally {
       if (mounted) {
         setState(() {
-          if (_sortKey != null &&
-              _rows.isNotEmpty &&
-              !_rows.first.containsKey(_sortKey!)) {
-            _sortKey = null;
-          }
           _loading = false;
         });
       }
@@ -586,30 +572,16 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
           .where((row) => row.values.any((v) => '$v'.toLowerCase().contains(q)))
           .toList();
     }
-    if (_sortKey != null) {
-      rows.sort((a, b) {
-        final av = '${a[_sortKey] ?? ''}';
-        final bv = '${b[_sortKey] ?? ''}';
-        final cmp = av.compareTo(bv);
-        return _sortAsc ? cmp : -cmp;
-      });
-    }
     return _appendUnifiedSummaryRow(rows);
   }
 
-  String _label(String key) {
-    final words = key.split('_').where((w) => w.isNotEmpty).toList();
-    if (words.isEmpty) return key;
-    return words.map((w) => '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
-  }
-
   String get _pageTitle => switch (widget.reportType) {
-    'sales_unified' => 'Sales report',
-    'sales_summary' => 'Sales summary',
+    'sales_unified' => 'Sales',
+    'sales_summary' => 'Sales',
     'sales_by_staff' => 'Sales by staff',
-    'stock_balance' => 'Stock balance',
-    'expiry_status' => 'Expiry status',
-    'profit_summary' => 'Profit summary',
+    'stock_balance' => 'Stock',
+    'expiry_status' => 'Expiry',
+    'profit_summary' => 'Profit',
     'sales_trend' => 'Sales trend',
     'sales_trend_daily' => 'Daily trend',
     'sales_trend_monthly' => 'Monthly trend',
@@ -617,100 +589,78 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
     _ => 'Report',
   };
 
-  Widget _reportSearchBarRow(ThemeData t, ColorScheme cs, int displayCount) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: SearchBar(
-              controller: _searchCtl,
-              hintText: 'Search in table…',
-              leading: Icon(
-                Icons.search_rounded,
-                color: cs.onSurfaceVariant,
-              ),
-              trailing: [
-                if (_filter.isNotEmpty)
-                  IconButton(
-                    tooltip: 'Clear',
-                    icon: Icon(
-                      Icons.close_rounded,
-                      color: cs.onSurfaceVariant,
-                    ),
-                    onPressed: () {
-                      _searchCtl.clear();
-                      setState(() => _filter = '');
-                    },
-                  ),
-              ],
-              onChanged: (v) => setState(() => _filter = v),
-              elevation: WidgetStateProperty.all(0),
-              backgroundColor: WidgetStateProperty.all(
-                cs.surface.withValues(alpha: 0.95),
-              ),
-              side: WidgetStateProperty.all(
-                BorderSide(
-                  color: cs.outline.withValues(
-                    alpha: 0.22,
-                  ),
-                ),
-              ),
-              shape: WidgetStateProperty.all(
-                RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 6,
-              ),
-              decoration: BoxDecoration(
-                color: cs.primaryContainer.withValues(
-                  alpha: 0.65,
-                ),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '$displayCount',
-                style: t.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: cs.onPrimaryContainer,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  ReportDatePreset? get _visibleDatePreset {
+    return switch (_datePreset) {
+      _DatePreset.today => ReportDatePreset.today,
+      _DatePreset.last7 => ReportDatePreset.last7,
+      _DatePreset.thisMonth => ReportDatePreset.thisMonth,
+      _DatePreset.last30 => ReportDatePreset.last30,
+      _ => null,
+    };
   }
 
-  Future<void> _pickDate(bool isFrom) async {
-    setState(() => _datePreset = _DatePreset.custom);
-    final initial = isFrom ? _from : _to;
-    final d = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-    );
-    if (d != null) {
-      setState(() {
-        if (isFrom) {
-          _from = _dateOnly(d);
-        } else {
-          _to = _dateOnly(d);
+  String? get _dateRangeLabel {
+    if (!_isSalesRangeReport) return null;
+    return switch (_datePreset) {
+      _DatePreset.custom ||
+      _DatePreset.thisYear ||
+      _DatePreset.lifetime ||
+      _DatePreset.last30 =>
+        '${formatDdMmYyyy(_from)} – ${formatDdMmYyyy(_to)}',
+      _ => null,
+    };
+  }
+
+  int get _advancedFilterCount {
+    var count = 0;
+    if (_isSalesRangeReport) {
+      if (_narrowPharmacistSalesDates) {
+        if (_datePreset != _DatePreset.today &&
+            _datePreset != _DatePreset.last7 &&
+            _datePreset != _DatePreset.last30) {
+          count++;
         }
-      });
-      _runSoon();
+      } else if (_datePreset != _DatePreset.today &&
+          _datePreset != _DatePreset.last7 &&
+          _datePreset != _DatePreset.thisMonth) {
+        count++;
+      }
     }
+    if (_selectedSellerId != null) count++;
+    if (_selectedPaymentMethod != null) count++;
+    if (_overridesOnly) count++;
+    if (_selectedCategoryKeys.isNotEmpty) count++;
+    if (widget.reportType == 'expiry_status' &&
+        (_thresholdCtl.text.trim().isNotEmpty &&
+            _thresholdCtl.text.trim() != '90')) {
+      count++;
+    }
+    return count;
+  }
+
+  void _applyVisibleDatePreset(ReportDatePreset preset) {
+    _applyDatePreset(switch (preset) {
+      ReportDatePreset.today => _DatePreset.today,
+      ReportDatePreset.last7 => _DatePreset.last7,
+      ReportDatePreset.thisMonth => _DatePreset.thisMonth,
+      ReportDatePreset.last30 => _DatePreset.last30,
+      ReportDatePreset.thisYear => _DatePreset.thisYear,
+      ReportDatePreset.lifetime => _DatePreset.lifetime,
+      ReportDatePreset.custom => _DatePreset.custom,
+    });
+  }
+
+  Widget _reportSearchBarRow(ThemeData t, ColorScheme cs, int displayCount) {
+    return ReportSearchField(
+      controller: _searchCtl,
+      hintText: 'Search this report…',
+      resultCount: displayCount,
+      onChanged: (v) => setState(() => _filter = v),
+      onClear: () {
+        _searchCtl.clear();
+        setState(() => _filter = '');
+      },
+    );
   }
 
   Future<void> _pickDateRangeQuick() async {
@@ -730,26 +680,269 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
     }
   }
 
+  Future<void> _showMoreFilters(
+    BuildContext context,
+    List<Map<String, String>> categoryOptions,
+  ) async {
+    final t = Theme.of(context);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModal) {
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.viewInsetsOf(context).bottom + 12,
+                ),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Filters',
+                        style: t.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      if (_isSalesRangeReport && !_narrowPharmacistSalesDates) ...[
+                        Text(
+                          'Date range',
+                          style: t.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Material(
+                          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(14),
+                          child: ListTile(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            leading: const Icon(Icons.date_range_rounded),
+                            title: Text(
+                              '${formatDdMmYyyy(_from)} – ${formatDdMmYyyy(_to)}',
+                            ),
+                            subtitle: const Text('Pick custom dates'),
+                            trailing: const Icon(Icons.chevron_right_rounded),
+                            onTap: () async {
+                              Navigator.pop(ctx);
+                              await _pickDateRangeQuick();
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            FilterChip(
+                              label: const Text('Last 30 days'),
+                              selected: _datePreset == _DatePreset.last30,
+                              onSelected: (_) {
+                                setState(() => _applyDatePreset(_DatePreset.last30));
+                                Navigator.pop(ctx);
+                                _runSoon();
+                              },
+                            ),
+                            FilterChip(
+                              label: const Text('This year'),
+                              selected: _datePreset == _DatePreset.thisYear,
+                              onSelected: (_) {
+                                setState(() => _applyDatePreset(_DatePreset.thisYear));
+                                Navigator.pop(ctx);
+                                _runSoon();
+                              },
+                            ),
+                            FilterChip(
+                              label: const Text('Lifetime'),
+                              selected: _datePreset == _DatePreset.lifetime,
+                              onSelected: (_) {
+                                setState(() => _applyDatePreset(_DatePreset.lifetime));
+                                Navigator.pop(ctx);
+                                _runSoon();
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+                      ],
+                      if (_isUnifiedSalesReport) ...[
+                        Text(
+                          'Sales details',
+                          style: t.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (!_isPharmacist)
+                          DropdownButtonFormField<String>(
+                            initialValue: _selectedSellerId,
+                            decoration: const InputDecoration(
+                              labelText: 'Staff member',
+                              border: OutlineInputBorder(),
+                            ),
+                            isExpanded: true,
+                            items: [
+                              const DropdownMenuItem<String>(
+                                value: null,
+                                child: Text('All staff'),
+                              ),
+                              ..._sellerOptions.map(
+                                (s) => DropdownMenuItem<String>(
+                                  value: s['id'],
+                                  child: Text(
+                                    s['name'] ?? '',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              setModal(() => _selectedSellerId = value);
+                            },
+                          ),
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<String>(
+                          initialValue: _selectedPaymentMethod,
+                          decoration: const InputDecoration(
+                            labelText: 'Payment method',
+                            border: OutlineInputBorder(),
+                          ),
+                          isExpanded: true,
+                          items: const [
+                            DropdownMenuItem<String>(
+                              value: null,
+                              child: Text('All methods'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'cash',
+                              child: Text('Cash'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'mobile_banking',
+                              child: Text('Mobile banking'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            setModal(() => _selectedPaymentMethod = value);
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                        SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Price overrides only'),
+                          value: _overridesOnly,
+                          onChanged: (v) => setModal(() => _overridesOnly = v),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (_supportsCategoryFilter && categoryOptions.isNotEmpty) ...[
+                        Text(
+                          'Categories',
+                          style: t.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Material(
+                          borderRadius: BorderRadius.circular(14),
+                          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                          child: ListTile(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            title: const Text('Medicine categories'),
+                            subtitle: Text(
+                              _selectedCategoryKeys.isEmpty
+                                  ? 'All categories'
+                                  : '${_selectedCategoryKeys.length} selected',
+                            ),
+                            trailing: const Icon(Icons.chevron_right_rounded),
+                            onTap: () async {
+                              final selected = await _pickCategoryIds(
+                                categoryOptions,
+                                _selectedCategoryKeys,
+                              );
+                              if (selected == null) return;
+                              setModal(() {
+                                _selectedCategoryKeys
+                                  ..clear()
+                                  ..addAll(selected);
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (widget.reportType == 'expiry_status') ...[
+                        TextField(
+                          controller: _thresholdCtl,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          decoration: const InputDecoration(
+                            labelText: 'Days ahead for expiry warning',
+                            hintText: '90',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      FilledButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _runSoon();
+                        },
+                        child: const Text('Apply filters'),
+                      ),
+                      if (_advancedFilterCount > 0) ...[
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              if (_isSalesRangeReport) {
+                                _applyDatePreset(
+                                  _narrowPharmacistSalesDates
+                                      ? _DatePreset.today
+                                      : _DatePreset.thisMonth,
+                                );
+                              }
+                              _selectedSellerId = null;
+                              _selectedPaymentMethod = null;
+                              _overridesOnly = false;
+                              _selectedCategoryKeys.clear();
+                              _thresholdCtl.text = '90';
+                            });
+                            Navigator.pop(ctx);
+                            _runSoon();
+                          },
+                          child: const Text('Clear all filters'),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_pharmacistProfitBlocked) {
       return Scaffold(
-        appBar: AppBar(
-          leading: IconButton(
-            tooltip: 'Back',
-            icon: const Icon(Icons.arrow_back_rounded),
-            onPressed: () {
-              if (Navigator.of(context).canPop()) {
-                context.pop();
-              } else {
-                context.go('/pharmacy/reports');
-              }
-            },
-          ),
-          scrolledUnderElevation: 0,
-          surfaceTintColor: Colors.transparent,
-          title: const Text('Profit summary'),
-        ),
+        appBar: pharmacyPageAppBar(context, title: 'Profit summary'),
         body: const Center(
           child: Padding(
             padding: EdgeInsets.all(24),
@@ -764,15 +957,17 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
     final t = Theme.of(context);
     final cs = t.colorScheme;
     final keys = _rows.isNotEmpty
-        ? _rows.first.keys.where((k) => k != 'sale_id').toList()
+        ? visibleReportKeys(widget.reportType, _rows.first.keys)
         : <String>[];
     final display = _displayRows;
     final hasData = _rows.isNotEmpty;
     final filterTrim = _filter.trim();
-    final showInitialTableEmpty =
+    final showInitialEmpty =
         display.isEmpty && !hasData && filterTrim.isEmpty;
-    final showEmptyTableWithSearch =
+    final showEmptyWithSearch =
         display.isEmpty && (hasData || filterTrim.isNotEmpty);
+    final isProfitSummary =
+        widget.reportType == 'profit_summary' && _rows.length == 1;
     final categoriesAsync = ref.watch(activeBranchMedicineCategoriesProvider);
     final categoryOptions =
         categoriesAsync.value
@@ -788,24 +983,9 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
 
     return Scaffold(
       backgroundColor: cs.surface,
-      appBar: AppBar(
-        title: Text(
-          _pageTitle,
-          style: TextStyle(color: cs.onSurface, fontWeight: FontWeight.w600),
-        ),
-        leading: IconButton(
-          tooltip: 'Back',
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () {
-            if (Navigator.of(context).canPop()) {
-              context.pop();
-            } else {
-              context.go('/pharmacy/reports');
-            }
-          },
-        ),
-        scrolledUnderElevation: 0,
-        surfaceTintColor: Colors.transparent,
+      appBar: pharmacyPageAppBar(
+        context,
+        title: _pageTitle,
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -834,340 +1014,58 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
           Material(
             color: cs.surface,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (_isSalesRangeReport) ...[
                     if (widget.reportType == 'sales_trend') ...[
-                      SegmentedButton<_TrendPreset>(
-                        showSelectedIcon: false,
-                        segments: const [
-                          ButtonSegment(
-                            value: _TrendPreset.day,
-                            label: Text('Day'),
-                          ),
-                          ButtonSegment(
-                            value: _TrendPreset.month,
-                            label: Text('Month'),
-                          ),
-                          ButtonSegment(
-                            value: _TrendPreset.year,
-                            label: Text('Year'),
-                          ),
-                        ],
-                        selected: {_trendPreset},
-                        onSelectionChanged: (next) {
-                          setState(() => _trendPreset = next.first);
-                          _runSoon();
-                        },
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            for (final (preset, label) in [
+                              (_TrendPreset.day, 'Day'),
+                              (_TrendPreset.month, 'Month'),
+                              (_TrendPreset.year, 'Year'),
+                            ]) ...[
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: FilterChip(
+                                  label: Text(label),
+                                  selected: _trendPreset == preset,
+                                  showCheckmark: false,
+                                  onSelected: (_) {
+                                    setState(() => _trendPreset = preset);
+                                    _runSoon();
+                                  },
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                     ],
-                    SegmentedButton<_DatePreset>(
-                      showSelectedIcon: false,
-                      segments: [
-                        const ButtonSegment(
-                          value: _DatePreset.today,
-                          label: Text('Today'),
-                          icon: Icon(Icons.today_rounded, size: 16),
-                        ),
-                        const ButtonSegment(
-                          value: _DatePreset.last7,
-                          label: Text('7d'),
-                          icon: Icon(Icons.view_week_rounded, size: 16),
-                        ),
-                        const ButtonSegment(
-                          value: _DatePreset.last30,
-                          label: Text('30d'),
-                          icon: Icon(Icons.date_range_rounded, size: 16),
-                        ),
-                        if (!_narrowPharmacistSalesDates) ...[
-                          const ButtonSegment(
-                            value: _DatePreset.thisYear,
-                            label: Text('Annual'),
-                            icon: Icon(Icons.calendar_today_rounded, size: 16),
-                          ),
-                          const ButtonSegment(
-                            value: _DatePreset.custom,
-                            label: Text('Custom'),
-                            icon: Icon(Icons.edit_calendar_rounded, size: 16),
-                          ),
-                        ],
-                      ],
-                      selected: {_datePreset},
-                      onSelectionChanged: (next) {
-                        setState(() => _applyDatePreset(next.first));
+                    ReportDateFilterBar(
+                      selected: _visibleDatePreset,
+                      pharmacistMode: _narrowPharmacistSalesDates,
+                      filterCount: _advancedFilterCount,
+                      rangeLabel: _dateRangeLabel,
+                      onSelected: (preset) {
+                        setState(() => _applyVisibleDatePreset(preset));
                         _runSoon();
                       },
+                      onOpenFilters: () =>
+                          _showMoreFilters(context, categoryOptions),
                     ),
-                    const SizedBox(height: 8),
-                  ],
-                  Theme(
-                    data: t.copyWith(dividerColor: Colors.transparent),
-                    child: ExpansionTile(
-                      maintainState: true,
-                      initiallyExpanded: _filtersExpanded,
-                      onExpansionChanged: (v) =>
-                          setState(() => _filtersExpanded = v),
-                      tilePadding: const EdgeInsets.symmetric(horizontal: 4),
-                      childrenPadding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
-                      title: const Text('More filters'),
-                      subtitle: Text(
-                        _isUnifiedSalesReport
-                            ? 'Staff, payment, amount, overrides'
-                            : 'Extra report options',
-                        style: t.textTheme.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                        ),
-                      ),
-                      children: [
-                        if (_isSalesRangeReport && !_narrowPharmacistSalesDates)
-                          InkWell(
-                            onTap: _pickDateRangeQuick,
-                            borderRadius: BorderRadius.circular(14),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                color: cs.surfaceContainerHighest.withValues(
-                                  alpha: 0.35,
-                                ),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: cs.outline.withValues(alpha: 0.22),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.calendar_month_rounded,
-                                    size: 22,
-                                    color: cs.primary,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      '${formatDdMmYyyy(_from)} → ${formatDdMmYyyy(_to)}',
-                                      style: t.textTheme.titleSmall?.copyWith(
-                                        fontWeight: FontWeight.w700,
-                                        color: cs.onSurface,
-                                      ),
-                                    ),
-                                  ),
-                                  TextButton(
-                                    onPressed: () => _pickDate(true),
-                                    child: const Text('From'),
-                                  ),
-                                  TextButton(
-                                    onPressed: () => _pickDate(false),
-                                    child: const Text('To'),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        if (_isUnifiedSalesReport) ...[
-                          const SizedBox(height: 10),
-                          LayoutBuilder(
-                            builder: (context, constraints) {
-                              const spacing = 10.0;
-                              final fieldWidth =
-                                  (constraints.maxWidth - spacing) / 2;
-                              final cellWidth = fieldWidth < 180
-                                  ? constraints.maxWidth
-                                  : fieldWidth;
-                              return Wrap(
-                                spacing: spacing,
-                                runSpacing: spacing,
-                                children: [
-                                  if (!_isPharmacist)
-                                    SizedBox(
-                                      width: cellWidth,
-                                      child: DropdownButtonFormField<String>(
-                                        initialValue: _selectedSellerId,
-                                        decoration: const InputDecoration(
-                                          labelText: 'Staff',
-                                          isDense: true,
-                                        ),
-                                        isExpanded: true,
-                                        items: [
-                                          const DropdownMenuItem<String>(
-                                            value: null,
-                                            child: Text('All staff'),
-                                          ),
-                                          ..._sellerOptions.map(
-                                            (s) => DropdownMenuItem<String>(
-                                              value: s['id'],
-                                              child: Text(
-                                                s['name'] ?? '',
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                        onChanged: (value) {
-                                          setState(
-                                            () => _selectedSellerId = value,
-                                          );
-                                          _runSoon();
-                                        },
-                                      ),
-                                    ),
-                                  SizedBox(
-                                    width: cellWidth,
-                                    child: DropdownButtonFormField<String>(
-                                      initialValue: _selectedPaymentMethod,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Payment',
-                                        isDense: true,
-                                      ),
-                                      isExpanded: true,
-                                      items: const [
-                                        DropdownMenuItem<String>(
-                                          value: null,
-                                          child: Text('All methods'),
-                                        ),
-                                        DropdownMenuItem<String>(
-                                          value: 'cash',
-                                          child: Text('Cash'),
-                                        ),
-                                        DropdownMenuItem<String>(
-                                          value: 'mobile_banking',
-                                          child: Text('Mobile banking'),
-                                        ),
-                                      ],
-                                      onChanged: (value) {
-                                        setState(
-                                          () => _selectedPaymentMethod = value,
-                                        );
-                                        _runSoon();
-                                      },
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: cellWidth,
-                                    child: TextField(
-                                      controller: _minAmountCtl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                            decimal: true,
-                                          ),
-                                      decoration: const InputDecoration(
-                                        labelText: 'Min amount',
-                                        isDense: true,
-                                      ),
-                                      onChanged: (_) => _runSoon(),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: cellWidth,
-                                    child: TextField(
-                                      controller: _maxAmountCtl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                            decimal: true,
-                                          ),
-                                      decoration: const InputDecoration(
-                                        labelText: 'Max amount',
-                                        isDense: true,
-                                      ),
-                                      onChanged: (_) => _runSoon(),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          SwitchListTile.adaptive(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('Only price overrides'),
-                            subtitle: const Text(
-                              'Show rows with override reasons only',
-                            ),
-                            value: _overridesOnly,
-                            onChanged: (v) {
-                              setState(() => _overridesOnly = v);
-                              _runSoon();
-                            },
-                          ),
-                        ],
-                        if (_supportsCategoryFilter && categoryOptions.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('Medicine categories'),
-                            subtitle: Text(
-                              _selectedCategoryKeys.isEmpty
-                                  ? 'All categories'
-                                  : '${_selectedCategoryKeys.length} selected',
-                            ),
-                            trailing: const Icon(Icons.checklist_rounded),
-                            onTap: () async {
-                              final selected = await _pickCategoryIds(
-                                categoryOptions,
-                                _selectedCategoryKeys,
-                              );
-                              if (selected == null) return;
-                              setState(() {
-                                _selectedCategoryKeys
-                                  ..clear()
-                                  ..addAll(selected);
-                              });
-                              _runSoon();
-                            },
-                          ),
-                        ],
-                        if (widget.reportType == 'expiry_status') ...[
-                          TextField(
-                            style: TextStyle(color: cs.onSurface, fontSize: 15),
-                            decoration: InputDecoration(
-                              labelText: 'Days ahead for expiry warning',
-                              hintText: '90',
-                              isDense: true,
-                              filled: true,
-                              fillColor: cs.surfaceContainerHighest.withValues(
-                                alpha: 0.35,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                borderSide: BorderSide(
-                                  color: cs.outline.withValues(alpha: 0.28),
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                borderSide: BorderSide(
-                                  color: cs.primary,
-                                  width: 1.5,
-                                ),
-                              ),
-                            ),
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                            ],
-                            controller: _thresholdCtl,
-                            onChanged: (_) => _runSoon(),
-                          ),
-                        ],
-                        if (widget.reportType == 'stock_balance')
-                          Text(
-                            'Snapshot of this branch (no date filter).',
-                            style: t.textTheme.bodySmall?.copyWith(
-                              color: cs.onSurfaceVariant,
-                              height: 1.35,
-                            ),
-                          ),
-                      ],
+                  ] else if (_supportsCategoryFilter || widget.reportType == 'expiry_status')
+                    ReportDateFilterBar(
+                      showDatePresets: false,
+                      filterCount: _advancedFilterCount,
+                      onOpenFilters: () =>
+                          _showMoreFilters(context, categoryOptions),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -1178,181 +1076,44 @@ class _ReportViewerPageState extends ConsumerState<ReportViewerPage> {
               child: FormErrorBanner(message: _error!),
             ),
           Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerLow.withValues(alpha: 0.85),
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(22),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
-                    blurRadius: 12,
-                    offset: const Offset(0, -2),
-                  ),
-                ],
-              ),
+            child: ColoredBox(
+              color: cs.surfaceContainerLowest,
               child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(22),
-                ),
                 child: _loading && !hasData
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            CircularProgressIndicator(color: cs.primary),
-                            const SizedBox(height: 16),
-                            Text(
-                              'Fetching rows…',
-                              style: t.textTheme.bodyMedium?.copyWith(
-                                color: cs.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : showInitialTableEmpty
-                    ? _EmptyReportState(
+                    ? const Center(child: CircularProgressIndicator())
+                    : showInitialEmpty
+                    ? const _EmptyReportState(
                         hasRun: false,
-                        message:
-                            'Data loads automatically. Adjust filters above, or use refresh from the app bar.',
+                        message: 'Loading report…',
                       )
-                    : showEmptyTableWithSearch
+                    : showEmptyWithSearch
                     ? Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           _reportSearchBarRow(t, cs, display.length),
                           Expanded(
-                            child: !hasData && filterTrim.isNotEmpty
-                                ? _EmptyReportState(
-                                    hasRun: false,
-                                    title: 'Nothing to show',
-                                    icon: Icons.search_off_rounded,
-                                    message:
-                                        'There is no data for the current filters. Clear the table search or adjust filters above.',
-                                  )
-                                : _EmptyReportState(
-                                    hasRun: true,
-                                    message:
-                                        'No rows match your search. Clear the search box.',
-                                  ),
+                            child: _EmptyReportState(
+                              hasRun: hasData,
+                              message: hasData
+                                  ? 'No rows match your search.'
+                                  : 'Nothing to show for these filters.',
+                            ),
                           ),
                         ],
                       )
                     : Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: SearchBar(
-                                    controller: _searchCtl,
-                                    hintText: 'Search in table…',
-                                    leading: Icon(
-                                      Icons.search_rounded,
-                                      color: cs.onSurfaceVariant,
-                                    ),
-                                    trailing: [
-                                      if (_filter.isNotEmpty)
-                                        IconButton(
-                                          tooltip: 'Clear',
-                                          icon: Icon(
-                                            Icons.close_rounded,
-                                            color: cs.onSurfaceVariant,
-                                          ),
-                                          onPressed: () {
-                                            _searchCtl.clear();
-                                            setState(() => _filter = '');
-                                          },
-                                        ),
-                                    ],
-                                    onChanged: (v) =>
-                                        setState(() => _filter = v),
-                                    elevation: WidgetStateProperty.all(0),
-                                    backgroundColor: WidgetStateProperty.all(
-                                      cs.surface.withValues(alpha: 0.95),
-                                    ),
-                                    side: WidgetStateProperty.all(
-                                      BorderSide(
-                                        color: cs.outline.withValues(
-                                          alpha: 0.22,
-                                        ),
-                                      ),
-                                    ),
-                                    shape: WidgetStateProperty.all(
-                                      RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 10),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 6,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: cs.primaryContainer.withValues(
-                                        alpha: 0.65,
-                                      ),
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Text(
-                                      '${display.length}',
-                                      style: t.textTheme.labelLarge?.copyWith(
-                                        fontWeight: FontWeight.w700,
-                                        color: cs.onPrimaryContainer,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.swap_vert_rounded,
-                                  size: 18,
-                                  color: cs.onSurfaceVariant,
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    'Tap a column header to sort',
-                                    style: t.textTheme.labelMedium?.copyWith(
-                                      color: cs.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+                          if (!isProfitSummary)
+                            _reportSearchBarRow(t, cs, display.length),
                           Expanded(
-                            child: SingleChildScrollView(
-                              child: _ReportDataTable(
-                                keys: keys,
-                                rows: display,
-                                sortColumnId: _sortKey,
-                                sortAscending: _sortAsc,
-                                labelForKey: _label,
-                                onSort: (key, asc) {
-                                  setState(() {
-                                    _sortKey = key;
-                                    _sortAsc = asc;
-                                  });
-                                },
-                              ),
-                            ),
+                            child: isProfitSummary
+                                ? ProfitSummaryCard(row: _rows.first)
+                                : ReportSimpleList(
+                                    reportType: widget.reportType,
+                                    keys: keys,
+                                    rows: display,
+                                  ),
                           ),
                         ],
                       ),
@@ -1441,22 +1202,18 @@ class _EmptyReportState extends StatelessWidget {
   const _EmptyReportState({
     required this.hasRun,
     required this.message,
-    this.title,
-    this.icon,
   });
 
   final bool hasRun;
   final String message;
-  final String? title;
-  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final cs = t.colorScheme;
     final effectiveIcon =
-        icon ?? (hasRun ? Icons.search_off_rounded : Icons.table_rows_rounded);
-    final effectiveTitle = title ?? (hasRun ? 'No matches' : 'No rows yet');
+        hasRun ? Icons.search_off_rounded : Icons.table_rows_rounded;
+    final effectiveTitle = hasRun ? 'No matches' : 'No rows yet';
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
@@ -1493,129 +1250,5 @@ class _EmptyReportState extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _ReportDataTable extends StatelessWidget {
-  const _ReportDataTable({
-    required this.keys,
-    required this.rows,
-    required this.sortColumnId,
-    required this.sortAscending,
-    required this.labelForKey,
-    required this.onSort,
-  });
-
-  final List<String> keys;
-  final List<Map<String, dynamic>> rows;
-  final String? sortColumnId;
-  final bool sortAscending;
-  final String Function(String) labelForKey;
-  final void Function(String key, bool ascending) onSort;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final cs = t.colorScheme;
-    final sortIndex = sortColumnId != null ? keys.indexOf(sortColumnId!) : null;
-    final validIndex = sortIndex != null && sortIndex >= 0 ? sortIndex : null;
-
-    return LayoutBuilder(
-      builder: (context, c) {
-        final minTableWidth = math.max(c.maxWidth - 24, keys.length * 100.0);
-        return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
-          scrollDirection: Axis.horizontal,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minWidth: minTableWidth),
-            child: Material(
-              color: cs.surface.withValues(alpha: 0.98),
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: BorderSide(color: cs.outline.withValues(alpha: 0.18)),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Theme(
-                data: t.copyWith(
-                  dataTableTheme: DataTableThemeData(
-                    headingTextStyle: t.textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: cs.onSurface,
-                      letterSpacing: 0.1,
-                    ),
-                    dataTextStyle: t.textTheme.bodyMedium?.copyWith(
-                      color: cs.onSurface,
-                      height: 1.3,
-                    ),
-                    dividerThickness: 0,
-                  ),
-                ),
-                child: DataTable(
-                  headingRowColor: WidgetStatePropertyAll(
-                    cs.surfaceContainerHigh.withValues(alpha: 0.7),
-                  ),
-                  dataRowMinHeight: 46,
-                  horizontalMargin: 14,
-                  columnSpacing: 18,
-                  sortColumnIndex: validIndex,
-                  sortAscending: sortAscending,
-                  border: TableBorder(
-                    horizontalInside: BorderSide(
-                      color: cs.outlineVariant.withValues(alpha: 0.35),
-                    ),
-                  ),
-                  columns: [
-                    for (var i = 0; i < keys.length; i++)
-                      DataColumn(
-                        numeric: _columnLooksNumeric(rows, keys[i]),
-                        label: Text(labelForKey(keys[i])),
-                        onSort: (columnIndex, asc) =>
-                            onSort(keys[columnIndex], asc),
-                      ),
-                  ],
-                  rows: [
-                    for (var i = 0; i < rows.length; i++)
-                      DataRow(
-                        color: WidgetStatePropertyAll(
-                          i.isEven
-                              ? null
-                              : cs.surfaceContainerHighest.withValues(
-                                  alpha: 0.22,
-                                ),
-                        ),
-                        cells: [
-                          for (final k in keys)
-                            DataCell(
-                              SelectableText(
-                                _reportTableCellDisplayText(k, rows[i][k]),
-                                style: t.textTheme.bodyMedium?.copyWith(
-                                  color: cs.onSurface,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  bool _columnLooksNumeric(List<Map<String, dynamic>> rows, String key) {
-    var n = 0;
-    for (final r in rows) {
-      if (n >= 8) break;
-      final v = r[key];
-      if (v == null) continue;
-      if (v is num) return true;
-      if (num.tryParse(v.toString().trim()) != null) return true;
-      n++;
-    }
-    return false;
   }
 }

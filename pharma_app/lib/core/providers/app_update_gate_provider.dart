@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -33,6 +35,8 @@ class AppUpdateGateState {
 }
 
 class AppUpdateGateNotifier extends Notifier<AppUpdateGateState?> {
+  static const _networkTimeout = Duration(seconds: 4);
+
   Future<void>? _inFlight;
 
   @override
@@ -59,7 +63,8 @@ class AppUpdateGateNotifier extends Notifier<AppUpdateGateState?> {
             'min_supported_version, update_message, store_url_ios, store_url_android, store_url_web, force_update',
           )
           .eq('id', 1)
-          .maybeSingle();
+          .maybeSingle()
+          .timeout(_networkTimeout);
 
       if (row == null) {
         state = const AppUpdateGateState(blocked: false);
@@ -89,5 +94,5 @@ class AppUpdateGateNotifier extends Notifier<AppUpdateGateState?> {
 
 final appUpdateGateNotifierProvider =
     NotifierProvider<AppUpdateGateNotifier, AppUpdateGateState?>(
-  AppUpdateGateNotifier.new,
-);
+      AppUpdateGateNotifier.new,
+    );

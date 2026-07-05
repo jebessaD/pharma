@@ -6,6 +6,7 @@ import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/providers/post_pharmacy_sign_out.dart';
 import '../../core/shared_preferences_provider.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 
 class TeamSuspendedPage extends ConsumerWidget {
   const TeamSuspendedPage({super.key});
@@ -31,7 +32,7 @@ class TeamSuspendedPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Suspended')),
+      appBar: pharmacyHubAppBar(context, title: 'Suspended'),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),

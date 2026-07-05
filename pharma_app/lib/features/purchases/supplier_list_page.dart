@@ -34,6 +34,15 @@ class _SupplierListPageState extends ConsumerState<SupplierListPage> {
     if (mounted) _load();
   }
 
+  void _startPurchaseForSupplier(String id) {
+    if (id.isEmpty) return;
+    final uri = Uri(
+      path: '/pharmacy/purchases',
+      queryParameters: {'tab': 'new', 'supplier': id},
+    );
+    context.go(uri.toString());
+  }
+
   Future<void> _deleteSupplier(Map<String, dynamic> s) async {
     final id = s['id'] as String? ?? '';
     final name = s['name'] as String? ?? 'Supplier';
@@ -116,8 +125,10 @@ class _SupplierListPageState extends ConsumerState<SupplierListPage> {
         final dialogWidth = (screenW - 48).clamp(420.0, 720.0);
         return StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
-            insetPadding:
-                const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 24,
+            ),
             title: Row(
               children: [
                 const Expanded(child: Text('New supplier')),
@@ -218,77 +229,83 @@ class _SupplierListPageState extends ConsumerState<SupplierListPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? AppErrorState(
-                  message: _error!,
-                  onRetry: () {
-                    _load();
-                  },
-                )
-              : _rows.isEmpty
-                  ? const Center(child: Text('No suppliers'))
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      child: Builder(
-                        builder: (context) {
-                          final filtered = _rows.where((s) {
-                            if (_query.trim().isEmpty) return true;
-                            final q = _query.trim().toLowerCase();
-                            return ('${s['name'] ?? ''} ${s['phone'] ?? ''}')
-                                .toLowerCase()
-                                .contains(q);
-                          }).toList();
-                          return Column(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: TextField(
-                                  decoration: const InputDecoration(labelText: 'Search supplier'),
-                                  onChanged: (value) => setState(() => _query = value),
-                                ),
-                              ),
-                              Expanded(
-                                child: ListView.builder(
-                                  itemCount: filtered.length,
-                                  itemBuilder: (context, i) {
-                                    final s = filtered[i];
-                                    final id = s['id'] as String? ?? '';
-                                    return ListTile(
-                                      title: Text(s['name'] as String? ?? ''),
-                                      subtitle: Text(s['phone'] as String? ?? ''),
-                                      trailing: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          IconButton(
-                                            tooltip: 'Delete',
-                                            onPressed: () =>
-                                                _deleteSupplier(s),
-                                            icon: Icon(
-                                              Icons.delete_outline_rounded,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .error,
-                                            ),
-                                          ),
-                                          IconButton(
-                                            tooltip: 'Edit',
-                                            onPressed: () =>
-                                                _openSupplierEdit(id),
-                                            icon: const Icon(
-                                              Icons.edit_outlined,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      onTap: () => _openSupplierEdit(id),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          );
-                        },
+          ? AppErrorState(
+              message: _error!,
+              onRetry: () {
+                _load();
+              },
+            )
+          : _rows.isEmpty
+          ? const Center(child: Text('No suppliers'))
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: Builder(
+                builder: (context) {
+                  final filtered = _rows.where((s) {
+                    if (_query.trim().isEmpty) return true;
+                    final q = _query.trim().toLowerCase();
+                    return ('${s['name'] ?? ''} ${s['phone'] ?? ''}')
+                        .toLowerCase()
+                        .contains(q);
+                  }).toList();
+                  return Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: TextField(
+                          decoration: const InputDecoration(
+                            labelText: 'Search supplier',
+                          ),
+                          onChanged: (value) => setState(() => _query = value),
+                        ),
                       ),
-                    ),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: filtered.length,
+                          itemBuilder: (context, i) {
+                            final s = filtered[i];
+                            final id = s['id'] as String? ?? '';
+                            return ListTile(
+                              title: Text(s['name'] as String? ?? ''),
+                              subtitle: Text(s['phone'] as String? ?? ''),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'New purchase',
+                                    onPressed: () =>
+                                        _startPurchaseForSupplier(id),
+                                    icon: const Icon(
+                                      Icons.receipt_long_outlined,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Edit',
+                                    onPressed: () => _openSupplierEdit(id),
+                                    icon: const Icon(Icons.edit_outlined),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Delete',
+                                    onPressed: () => _deleteSupplier(s),
+                                    icon: Icon(
+                                      Icons.delete_outline_rounded,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.error,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              onTap: () => _openSupplierEdit(id),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
     );
   }
 }

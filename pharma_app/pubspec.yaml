@@ -1,5 +1,5 @@
 name: pharma_app
-description: "Pharma Shelf — pharmacy operations app (POS, stock, medicines) for teams in Ethiopia."
+description: "Pharma Shelf — pharmacy operations app (POS, stock, medicines) for pharmacy teams."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.8+9
+version: 1.0.10+11
 
 environment:
   sdk: ^3.10.8
@@ -92,6 +92,7 @@ flutter:
 
   assets:
     - logo.png
+    - assets/catalog/medicine_catalog.json
     - assets/onboarding/welcome-pharmacist.webp
     - assets/onboarding/inventory-check.webp
 

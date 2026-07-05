@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/widgets/app_error_state.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 
 class StaffListPage extends ConsumerStatefulWidget {
   const StaffListPage({super.key, this.embedInHub = false});
@@ -133,7 +134,7 @@ class _StaffListPageState extends ConsumerState<StaffListPage> {
       return body;
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Staff')),
+      appBar: pharmacyPageAppBar(context, title: 'Staff'),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openNewStaff,
         icon: const Icon(Icons.person_add_alt_1),

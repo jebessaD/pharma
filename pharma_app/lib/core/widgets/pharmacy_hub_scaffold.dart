@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// Shared shell for pharmacy hub screens: one [AppBar], primary [TabBar], [TabBarView].
+import 'pharmacy_page_app_bar.dart';
+
+/// Shared shell for pharmacy hub screens: title + [TabBar], flat bar.
 class PharmacyHubScaffold extends StatelessWidget {
   const PharmacyHubScaffold({
     super.key,
@@ -25,35 +27,21 @@ class PharmacyHubScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final cs = t.colorScheme;
-    final hasHeaderText = title.trim().isNotEmpty || (subtitle?.trim().isNotEmpty ?? false);
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
       floatingActionButton: floatingActionButton,
       floatingActionButtonLocation: floatingActionButtonLocation,
       appBar: AppBar(
-        toolbarHeight: hasHeaderText ? null : 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              title,
-              style: t.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.2,
-              ),
-            ),
-            if (subtitle != null && subtitle!.isNotEmpty)
-              Text(
-                subtitle!,
-                style: t.textTheme.bodySmall?.copyWith(
-                  color: cs.onSurfaceVariant,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
-          ],
-        ),
+        automaticallyImplyLeading: false,
+        title: pharmacyAppBarTitle(context, title, subtitle: subtitle),
+        centerTitle: false,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        backgroundColor: cs.surface,
+        toolbarHeight: (subtitle != null && subtitle!.trim().isNotEmpty)
+            ? 60
+            : 52,
         actions: actions,
         bottom: TabBar(
           controller: tabController,

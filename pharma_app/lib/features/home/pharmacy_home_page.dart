@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/layout/layout_density.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/platform_messages_provider.dart';
 import '../../core/providers/team_shell_meta_provider.dart';
@@ -14,6 +15,9 @@ import '../../core/providers/selected_branch_provider.dart';
 import '../../core/roles/stock_permissions.dart';
 import '../../core/widgets/app_error_state.dart';
 import '../../core/widgets/form_error_banner.dart';
+import '../pos/recent_sales_panel.dart';
+import '../pos/recent_sales_repository.dart';
+import 'home_reports_snapshot.dart';
 
 class PharmacyHomePage extends ConsumerWidget {
   const PharmacyHomePage({super.key});
@@ -89,27 +93,6 @@ class PharmacyHomePage extends ConsumerWidget {
               ),
             ],
           ),
-          _HomeSection(
-            title: 'Insights',
-            actions: [
-              _HomeAction(
-                icon: Icons.pie_chart_rounded,
-                label: 'Overview',
-                subtitle: 'Snapshot for this branch',
-                path: '/pharmacy/dashboard',
-                accent: Color(0xFF7C3AED),
-                accentSoft: Color(0xFFEDE9FE),
-              ),
-              _HomeAction(
-                icon: Icons.table_chart_rounded,
-                label: 'Report tables',
-                subtitle: 'Grids & CSV export',
-                path: '/pharmacy/reports',
-                accent: Color(0xFF4B5563),
-                accentSoft: Color(0xFFE5E7EB),
-              ),
-            ],
-          ),
         ];
       case 'admin':
       case 'owner':
@@ -163,22 +146,6 @@ class PharmacyHomePage extends ConsumerWidget {
             title: 'Insights & compliance',
             actions: [
               _HomeAction(
-                icon: Icons.pie_chart_rounded,
-                label: 'Overview',
-                subtitle: 'Snapshot for this branch',
-                path: '/pharmacy/dashboard',
-                accent: Color(0xFF7C3AED),
-                accentSoft: Color(0xFFEDE9FE),
-              ),
-              _HomeAction(
-                icon: Icons.table_chart_rounded,
-                label: 'Report tables',
-                subtitle: 'Grids & CSV export',
-                path: '/pharmacy/reports',
-                accent: Color(0xFF4B5563),
-                accentSoft: Color(0xFFE5E7EB),
-              ),
-              _HomeAction(
                 icon: Icons.history_rounded,
                 label: 'Audit log',
                 subtitle: 'Who changed what',
@@ -200,14 +167,6 @@ class PharmacyHomePage extends ConsumerWidget {
                 accentSoft: Color(0xFFFAE8FF),
               ),
               _HomeAction(
-                icon: Icons.local_shipping_rounded,
-                label: 'Suppliers',
-                subtitle: 'Vendor directory',
-                path: '/pharmacy/suppliers',
-                accent: Color(0xFF0369A1),
-                accentSoft: Color(0xFFE0F2FE),
-              ),
-              _HomeAction(
                 icon: Icons.receipt_long_rounded,
                 label: 'Purchases',
                 subtitle: 'Drafts and new stock orders',
@@ -227,6 +186,14 @@ class PharmacyHomePage extends ConsumerWidget {
                 path: '/pharmacy/organization',
                 accent: Color(0xFF4338CA),
                 accentSoft: Color(0xFFE0E7FF),
+              ),
+              _HomeAction(
+                icon: Icons.person_add_alt_1_rounded,
+                label: 'Add staff',
+                subtitle: 'Quick new team member',
+                path: '/pharmacy/organization?tab=staff&add=1',
+                accent: Color(0xFF7C3AED),
+                accentSoft: Color(0xFFEDE9FE),
               ),
             ],
           ),
@@ -291,7 +258,13 @@ class PharmacyHomePage extends ConsumerWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final maxW = constraints.maxWidth;
+              final mq = MediaQuery.of(context);
+              final density = LayoutDensityData.resolve(
+                size: Size(maxW, constraints.maxHeight),
+                textScaler: mq.textScaler,
+              );
               final pad = maxW >= 600 ? 28.0 : (maxW < 360 ? 12.0 : 20.0);
+              final compact = density.isCompact;
               final viewportCross = maxW < 340 ? 1 : (maxW >= 720 ? 3 : 2);
               final inner = (maxW - 2 * pad).clamp(0.0, double.infinity);
               final cellW = viewportCross <= 1
@@ -301,12 +274,13 @@ class PharmacyHomePage extends ConsumerWidget {
 
               final slivers = <Widget>[
                 SliverPadding(
-                  padding: EdgeInsets.fromLTRB(pad, 20, pad, 12),
+                  padding: EdgeInsets.fromLTRB(pad, compact ? 12 : 20, pad, compact ? 6 : 12),
                   sliver: SliverToBoxAdapter(
                     child: _GreetingHeader(
                       greeting: _greetingLine(),
                       name: first,
                       tagline: tagline,
+                      compact: compact,
                     ),
                   ),
                 ),
@@ -329,11 +303,24 @@ class PharmacyHomePage extends ConsumerWidget {
                   sliver: SliverToBoxAdapter(
                     child: _PosHeroCard(
                       emphasizeSell: role == 'cashier' || role == 'seller',
+                      compact: compact,
                       onTap: () {
                         HapticFeedback.lightImpact();
                         context.go('/pharmacy/pos');
                       },
                     ),
+                  ),
+                ),
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(pad, compact ? 8 : 12, pad, compact ? 8 : 12),
+                  sliver: SliverToBoxAdapter(
+                    child: HomeReportsSnapshotCard(compact: compact),
+                  ),
+                ),
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(pad, compact ? 8 : 12, pad, 8),
+                  sliver: SliverToBoxAdapter(
+                    child: RecentSalesPanel(limit: compact ? 3 : 5, compact: compact),
                   ),
                 ),
               ];
@@ -350,7 +337,7 @@ class PharmacyHomePage extends ConsumerWidget {
               } else {
                 for (var si = 0; si < sections.length; si++) {
                   final section = sections[si];
-                  final topPad = si == 0 ? 28.0 : 24.0;
+                  final topPad = si == 0 ? (compact ? 16.0 : 28.0) : (compact ? 14.0 : 24.0);
                   final gridCross = _gridCross(
                     viewportCross,
                     section.actions.length,
@@ -402,6 +389,8 @@ class PharmacyHomePage extends ConsumerWidget {
                   ref.invalidate(teamShellMetaProvider(teamId));
                 }
                 ref.invalidate(platformOpsProvider);
+                ref.read(homeReportsRefreshTickProvider.notifier).bump();
+                ref.read(recentSalesRefreshTickProvider.notifier).bump();
                 await ref.read(pharmacyProfileProvider.future);
               }
 
@@ -671,11 +660,13 @@ class _GreetingHeader extends StatelessWidget {
     required this.greeting,
     required this.name,
     required this.tagline,
+    this.compact = false,
   });
 
   final String greeting;
   final String name;
   final String tagline;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -695,19 +686,22 @@ class _GreetingHeader extends StatelessWidget {
         const SizedBox(height: 2),
         Text(
           name,
-          style: t.textTheme.headlineLarge?.copyWith(
+          style: (compact ? t.textTheme.headlineMedium : t.textTheme.headlineLarge)
+              ?.copyWith(
             fontWeight: FontWeight.w700,
             letterSpacing: -0.8,
             height: 1.1,
           ),
         ),
-        const SizedBox(height: 14),
+        SizedBox(height: compact ? 8 : 14),
         Text(
           tagline,
-          style: t.textTheme.bodyLarge?.copyWith(
+          style: t.textTheme.bodyMedium?.copyWith(
             color: cs.onSurfaceVariant,
-            height: 1.4,
+            height: 1.35,
           ),
+          maxLines: compact ? 2 : 3,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );
@@ -750,10 +744,15 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _PosHeroCard extends StatelessWidget {
-  const _PosHeroCard({required this.onTap, this.emphasizeSell = false});
+  const _PosHeroCard({
+    required this.onTap,
+    this.emphasizeSell = false,
+    this.compact = false,
+  });
 
   final VoidCallback onTap;
   final bool emphasizeSell;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -779,32 +778,37 @@ class _PosHeroCard extends StatelessWidget {
         : 'Fast sales · Cash & mobile';
 
     return Material(
-      elevation: isDark ? 0 : 3,
+      elevation: isDark ? 0 : (compact ? 2 : 3),
       shadowColor: cs.primary.withValues(alpha: 0.45),
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(compact ? 18 : 24),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: Ink(
           decoration: BoxDecoration(gradient: gradient),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(22, 22, 18, 22),
+            padding: EdgeInsets.fromLTRB(
+              compact ? 14 : 22,
+              compact ? 14 : 22,
+              compact ? 12 : 18,
+              compact ? 14 : 22,
+            ),
             child: Row(
               children: [
                 Container(
-                  width: 64,
-                  height: 64,
+                  width: compact ? 48 : 64,
+                  height: compact ? 48 : 64,
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.22),
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.circular(compact ? 14 : 18),
                   ),
                   child: Icon(
                     Icons.point_of_sale_rounded,
-                    size: 36,
+                    size: compact ? 28 : 36,
                     color: cs.onPrimary,
                   ),
                 ),
-                const SizedBox(width: 18),
+                SizedBox(width: compact ? 12 : 18),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -815,34 +819,40 @@ class _PosHeroCard extends StatelessWidget {
                           color: cs.onPrimary.withValues(alpha: 0.88),
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.6,
+                          fontSize: compact ? 12 : null,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      SizedBox(height: compact ? 2 : 4),
                       Text(
                         headline,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: t.textTheme.headlineSmall?.copyWith(
+                        style: (compact
+                                ? t.textTheme.titleLarge
+                                : t.textTheme.headlineSmall)
+                            ?.copyWith(
                           color: cs.onPrimary,
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.5,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        sub,
-                        style: t.textTheme.bodyMedium?.copyWith(
-                          color: cs.onPrimary.withValues(alpha: 0.85),
-                          height: 1.25,
+                      if (!compact) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          sub,
+                          style: t.textTheme.bodyMedium?.copyWith(
+                            color: cs.onPrimary.withValues(alpha: 0.85),
+                            height: 1.25,
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
                 Icon(
                   Icons.arrow_forward_rounded,
                   color: cs.onPrimary.withValues(alpha: 0.9),
-                  size: 28,
+                  size: compact ? 22 : 28,
                 ),
               ],
             ),
@@ -1068,7 +1078,7 @@ class _CashierHomeExtras extends StatelessWidget {
                 const SizedBox(width: 14),
                 Expanded(
                   child: Text(
-                    'After a sale, you can open the receipt from Sell or from history when your team enables it.',
+                    'After a confirmed sale, use Recent sales above to reopen the receipt and double-check what was recorded.',
                     style: t.textTheme.bodyMedium?.copyWith(
                       color: cs.onSurfaceVariant,
                       height: 1.35,

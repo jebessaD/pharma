@@ -4,11 +4,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/layout/layout_density.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
 import '../../core/utils/date_formatters.dart';
 import '../../core/widgets/app_error_state.dart';
+import '../../core/widgets/pharmacy_hub_list.dart';
 import '../../core/widgets/pharmacy_page_app_bar.dart';
 
 class StockMovementsPage extends ConsumerStatefulWidget {
@@ -184,192 +186,166 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
             .whereType<Map<String, String>>()
             .toList() ??
         const <Map<String, String>>[];
+    final density = context.layoutDensity;
+    final compact = density.isCompact;
     return Scaffold(
-      appBar: pharmacyHubAppBar(context, title: 'Stock history'),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          SafeArea(
+            bottom: false,
+            child: HubPageHeader(title: 'Stock history'),
+          ),
+          Expanded(
+            child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           Padding(
-            padding: const EdgeInsets.all(12),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outlineVariant,
+            padding: pharmacyHubFilterPadding(context).copyWith(top: 0, bottom: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                PharmacyHubSearchField(
+                  controller: _searchCtl,
+                  hintText: 'Medicine or batch',
+                  onChanged: (_) => setState(() {}),
                 ),
-                color: Theme.of(
-                  context,
-                ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SegmentedButton<_StockDatePreset>(
-                      showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment(
-                          value: _StockDatePreset.today,
-                          label: Text('Today'),
-                        ),
-                        ButtonSegment(
-                          value: _StockDatePreset.last7,
-                          label: Text('7d'),
-                        ),
-                        ButtonSegment(
-                          value: _StockDatePreset.last14,
-                          label: Text('14d'),
-                        ),
-                        ButtonSegment(
-                          value: _StockDatePreset.last30,
-                          label: Text('30d'),
-                        ),
-                        ButtonSegment(
-                          value: _StockDatePreset.custom,
-                          label: Text('Custom'),
-                        ),
-                      ],
-                      selected: {_datePreset},
-                      onSelectionChanged: (next) {
-                        _applyPreset(next.first);
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () async {
-                        final picked = await showDateRangePicker(
-                          context: context,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2100),
-                          initialDateRange: DateTimeRange(
-                            start: _from,
-                            end: _to,
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (final preset in _StockDatePreset.values)
+                        if (preset != _StockDatePreset.custom)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: FilterChip(
+                              label: Text(switch (preset) {
+                                _StockDatePreset.today => 'Today',
+                                _StockDatePreset.last7 => '7d',
+                                _StockDatePreset.last14 => '14d',
+                                _StockDatePreset.last30 => '30d',
+                                _StockDatePreset.custom => 'Custom',
+                              }),
+                              selected: _datePreset == preset,
+                              visualDensity: VisualDensity.compact,
+                              showCheckmark: false,
+                              onSelected: (_) => _applyPreset(preset),
+                            ),
                           ),
-                        );
-                        if (picked == null) return;
-                        setState(() {
-                          _datePreset = _StockDatePreset.custom;
-                          _from = DateTime(
-                            picked.start.year,
-                            picked.start.month,
-                            picked.start.day,
+                      FilterChip(
+                        label: const Text('Custom'),
+                        selected: _datePreset == _StockDatePreset.custom,
+                        visualDensity: VisualDensity.compact,
+                        showCheckmark: false,
+                        onSelected: (_) async {
+                          final picked = await showDateRangePicker(
+                            context: context,
+                            firstDate: DateTime(2020),
+                            lastDate: DateTime(2100),
+                            initialDateRange: DateTimeRange(
+                              start: _from,
+                              end: _to,
+                            ),
                           );
-                          _to = DateTime(
-                            picked.end.year,
-                            picked.end.month,
-                            picked.end.day,
-                          );
-                        });
-                        _runSoon();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.outlineVariant,
-                          ),
-                        ),
-                        child: Text(
-                          'Date range: ${formatDdMmYyyy(_from)} → ${formatDdMmYyyy(_to)}',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    if (categoryOptions.isNotEmpty) ...[
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Categories'),
-                        subtitle: Text(
-                          _selectedCategoryKeys.isEmpty
-                              ? 'All categories'
-                              : '${_selectedCategoryKeys.length} selected',
-                        ),
-                        trailing: const Icon(Icons.checklist_rounded),
-                        onTap: () async {
-                          final selected = await _pickCategoryIds(
-                            categoryOptions,
-                            _selectedCategoryKeys,
-                          );
-                          if (selected == null) return;
+                          if (picked == null) return;
                           setState(() {
-                            _selectedCategoryKeys
-                              ..clear()
-                              ..addAll(selected);
+                            _datePreset = _StockDatePreset.custom;
+                            _from = DateTime(
+                              picked.start.year,
+                              picked.start.month,
+                              picked.start.day,
+                            );
+                            _to = DateTime(
+                              picked.end.year,
+                              picked.end.month,
+                              picked.end.day,
+                            );
                           });
                           _runSoon();
                         },
                       ),
-                      const SizedBox(height: 10),
                     ],
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _searchCtl,
-                            decoration: const InputDecoration(
-                              labelText: 'Medicine / batch',
-                              prefixIcon: Icon(Icons.search_rounded),
-                              isDense: true,
-                            ),
-                            onChanged: (_) => setState(() {}),
-                          ),
+                  ),
+                ),
+                SizedBox(height: compact ? 4 : 6),
+                Text(
+                  '${formatDdMmYyyy(_from)} – ${formatDdMmYyyy(_to)}',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                SizedBox(height: compact ? 6 : 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      FilterChip(
+                        label: const Text('All'),
+                        selected: _selectedMovementType == null,
+                        visualDensity: VisualDensity.compact,
+                        showCheckmark: false,
+                        onSelected: (_) =>
+                            setState(() => _selectedMovementType = null),
+                      ),
+                      const SizedBox(width: 6),
+                      FilterChip(
+                        label: const Text('In'),
+                        selected: _selectedMovementType == 'purchase_in',
+                        visualDensity: VisualDensity.compact,
+                        showCheckmark: false,
+                        onSelected: (_) => setState(
+                          () => _selectedMovementType = 'purchase_in',
                         ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: 156,
-                          child: InputDecorator(
-                            decoration: const InputDecoration(
-                              labelText: 'Type',
-                              isDense: true,
-                              contentPadding: EdgeInsetsDirectional.only(
-                                start: 12,
-                                end: 4,
-                                top: 4,
-                                bottom: 4,
-                              ),
-                              border: OutlineInputBorder(),
-                            ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<String?>(
-                                value: _selectedMovementType,
-                                isDense: true,
-                                isExpanded: true,
-                                items: const [
-                                  DropdownMenuItem<String?>(
-                                    value: null,
-                                    child: Text('All types'),
-                                  ),
-                                  DropdownMenuItem<String?>(
-                                    value: 'purchase_in',
-                                    child: Text('Stock in'),
-                                  ),
-                                  DropdownMenuItem<String?>(
-                                    value: 'sale_out',
-                                    child: Text('Sale'),
-                                  ),
-                                  DropdownMenuItem<String?>(
-                                    value: 'adjustment',
-                                    child: Text('Adjustment'),
-                                  ),
-                                ],
-                                onChanged: (v) =>
-                                    setState(() => _selectedMovementType = v),
-                              ),
-                            ),
+                      ),
+                      const SizedBox(width: 6),
+                      FilterChip(
+                        label: const Text('Sale'),
+                        selected: _selectedMovementType == 'sale_out',
+                        visualDensity: VisualDensity.compact,
+                        showCheckmark: false,
+                        onSelected: (_) =>
+                            setState(() => _selectedMovementType = 'sale_out'),
+                      ),
+                      const SizedBox(width: 6),
+                      FilterChip(
+                        label: const Text('Adj'),
+                        selected: _selectedMovementType == 'adjustment',
+                        visualDensity: VisualDensity.compact,
+                        showCheckmark: false,
+                        onSelected: (_) => setState(
+                          () => _selectedMovementType = 'adjustment',
+                        ),
+                      ),
+                      if (categoryOptions.isNotEmpty) ...[
+                        const SizedBox(width: 6),
+                        FilterChip(
+                          label: Text(
+                            _selectedCategoryKeys.isEmpty
+                                ? 'Category'
+                                : '${_selectedCategoryKeys.length} cat.',
                           ),
+                          visualDensity: VisualDensity.compact,
+                          showCheckmark: false,
+                          onSelected: (_) async {
+                            final selected = await _pickCategoryIds(
+                              categoryOptions,
+                              _selectedCategoryKeys,
+                            );
+                            if (selected == null) return;
+                            setState(() {
+                              _selectedCategoryKeys
+                                ..clear()
+                                ..addAll(selected);
+                            });
+                            _runSoon();
+                          },
                         ),
                       ],
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
           Expanded(
@@ -384,6 +360,7 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
                     itemCount: _filtered.length,
                     itemBuilder: (context, i) {
                       final r = _filtered[i];
+                      final t = Theme.of(context);
                       final mb = r['medicine_batches'] as Map<String, dynamic>?;
                       final med = mb?['medicines'] as Map<String, dynamic>?;
                       final name = med?['name'] as String? ?? '';
@@ -391,37 +368,82 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
                       final ts = formatDdMmYyyyHm(r['created_at']);
                       final qty = '${r['qty_change_base_unit']}';
                       final isOut = qty.startsWith('-');
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.outlineVariant.withValues(alpha: 0.5),
+                      final cs = Theme.of(context).colorScheme;
+                      final accent = isOut ? cs.error : const Color(0xFF15803D);
+                      return Container(
+                        margin: EdgeInsets.only(bottom: compact ? 4 : 6),
+                        decoration: BoxDecoration(
+                          color: cs.surface,
+                          borderRadius: BorderRadius.circular(compact ? 8 : 10),
+                          border: Border.all(
+                            color: cs.outlineVariant.withValues(alpha: 0.45),
                           ),
                         ),
-                        child: ListTile(
-                          dense: true,
-                          title: Text(name),
-                          subtitle: Text(
-                            '${_movementTypeLabel(r['movement_type'] as String?)} · '
-                            '$batch · $ts'
-                            '${r['reason'] != null ? '\n${r['reason']}' : ''}',
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(compact ? 8 : 10),
+                            border: Border(
+                              left: BorderSide(color: accent, width: compact ? 2 : 3),
+                            ),
                           ),
-                          trailing: Text(
-                            qty,
-                            style: TextStyle(
-                              color: isOut
-                                  ? Theme.of(context).colorScheme.error
-                                  : Theme.of(context).colorScheme.primary,
-                              fontWeight: FontWeight.w700,
+                          child: ListTile(
+                            dense: true,
+                            visualDensity: VisualDensity.compact,
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: compact ? 10 : 12,
+                              vertical: compact ? 0 : 2,
+                            ),
+                            title: Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: compact ? 13 : null,
+                              ),
+                            ),
+                            subtitle: Text(
+                              compact
+                                  ? '${_movementTypeLabel(r['movement_type'] as String?)} · $batch'
+                                  : '${_movementTypeLabel(r['movement_type'] as String?)} · '
+                                        '$batch · $ts'
+                                        '${r['reason'] != null ? '\n${r['reason']}' : ''}',
+                              maxLines: compact ? 1 : 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: compact
+                                  ? t.textTheme.labelSmall
+                                  : null,
+                            ),
+                            trailing: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  qty,
+                                  style: TextStyle(
+                                    color: accent,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: compact ? 13 : null,
+                                  ),
+                                ),
+                                if (compact)
+                                  Text(
+                                    ts.split(' ').first,
+                                    style: t.textTheme.labelSmall?.copyWith(
+                                      color: cs.onSurfaceVariant,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         ),
                       );
                     },
                   ),
+          ),
+        ],
+            ),
           ),
         ],
       ),

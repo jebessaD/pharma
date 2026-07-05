@@ -4,8 +4,9 @@ import 'package:pub_semver/pub_semver.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Active platform messages + read state for the signed-in user (ops / announcements).
-final platformOpsProvider =
-    FutureProvider.autoDispose<PlatformOpsSnapshot>((ref) async {
+final platformOpsProvider = FutureProvider.autoDispose<PlatformOpsSnapshot>((
+  ref,
+) async {
   final uid = Supabase.instance.client.auth.currentUser?.id;
   final info = await PackageInfo.fromPlatform();
   final appVersion = info.version.split('+').first.trim();
@@ -27,8 +28,7 @@ final platformOpsProvider =
       .select('message_id')
       .eq('user_id', uid);
   final readIds = <String>{
-    for (final r in readsRaw as List)
-      r['message_id'] as String,
+    for (final r in readsRaw as List) r['message_id'] as String,
   };
 
   Version? appVer;
@@ -40,6 +40,8 @@ final platformOpsProvider =
 
   final visible = <Map<String, dynamic>>[];
   for (final m in rows) {
+    final id = m['id'] as String?;
+    if (id != null && readIds.contains(id)) continue;
     final minRaw = m['min_app_version'] as String?;
     if (minRaw != null && minRaw.trim().isNotEmpty && appVer != null) {
       try {
@@ -56,10 +58,7 @@ final platformOpsProvider =
 });
 
 class PlatformOpsSnapshot {
-  const PlatformOpsSnapshot({
-    required this.messages,
-    required this.readIds,
-  });
+  const PlatformOpsSnapshot({required this.messages, required this.readIds});
 
   final List<Map<String, dynamic>> messages;
   final Set<String> readIds;

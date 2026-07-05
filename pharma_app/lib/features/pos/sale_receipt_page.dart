@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/widgets/app_error_state.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 import 'receipt_download_share.dart';
 import 'receipt_image_bytes.dart';
 import 'sale_receipt_text.dart';
@@ -178,9 +179,7 @@ class _SaleReceiptPageState extends State<SaleReceiptPage> {
   Widget build(BuildContext context) {
     final maxW = math.min(420.0, MediaQuery.sizeOf(context).width - 32);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Receipt'),
-      ),
+      appBar: pharmacyPageAppBar(context, title: 'Receipt'),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null

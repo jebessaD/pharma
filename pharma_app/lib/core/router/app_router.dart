@@ -5,10 +5,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../auth/auth_persistence.dart';
 import '../onboarding/first_install_intro.dart';
+import '../registration/registration_location.dart';
 import '../providers/app_update_gate_provider.dart';
 import '../providers/connectivity_provider.dart';
 import '../providers/pharmacy_redirect_cache_provider.dart';
-import '../registration/registration_location.dart';
 import '../roles/stock_permissions.dart';
 import '../providers.dart';
 import '../shared_preferences_provider.dart';
@@ -30,11 +30,9 @@ import '../../features/pharmacy/pharmacy_shell.dart';
 import '../../features/pos/pos_page.dart';
 import '../../features/pos/sale_receipt_page.dart';
 import '../../features/purchases/create_purchase_page.dart';
-import '../../features/purchases/edit_supplier_page.dart';
 import '../../features/purchases/purchases_hub_page.dart';
-import '../../features/purchases/supplier_list_page.dart';
 import '../../features/reports/report_viewer_page.dart';
-import '../../features/reports/reports_home_page.dart';
+import '../../features/reports/unified_reports_page.dart';
 import '../../features/staff/create_staff_page.dart';
 import '../../features/staff/edit_staff_page.dart';
 import '../../features/shell/auth_callback_page.dart';
@@ -50,7 +48,6 @@ import '../../features/shell/update_required_page.dart';
 import '../../features/team/create_branch_page.dart';
 import '../../features/team/edit_branch_page.dart';
 import '../../features/team/organization_hub_page.dart';
-import '../../features/dashboard/dashboard_home_page.dart';
 
 final goRouterProvider = Provider<GoRouter>((ref) {
   final refresh = Listenable.merge([
@@ -68,6 +65,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
 
       // Redirect precedence: force update → auth → team suspended → billing block
       // → trial ended → role allowlists.
+      if (loc == '/splash') return null;
+
       if (loc == '/update-required') {
         await ref.read(appUpdateGateNotifierProvider.notifier).ensureHydrated();
         final ug = ref.read(appUpdateGateNotifierProvider);
@@ -136,7 +135,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
 
       if (loc == '/trial-ended' && session == null) return '/login';
       if (loc == '/billing-blocked' && session == null) return '/login';
-      if (loc == '/signup' && session != null) return '/pharmacy';
 
       if (loc == '/trial-ended' && session != null && userId != null) {
         try {
@@ -209,7 +207,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         return null;
       }
 
-      if (loc == '/splash') return null;
       if (session != null && (loc == '/' || loc == '/intro')) {
         return '/pharmacy';
       }
@@ -377,7 +374,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                     'staff' => OrganizationHubTab.staff,
                     _ => OrganizationHubTab.profile,
                   };
-                  return OrganizationHubPage(initialTab: initial);
+                  return OrganizationHubPage(
+                    initialTab: initial,
+                    autoOpenStaffAdd: state.uri.queryParameters['add'] == '1',
+                  );
                 },
               ),
               GoRoute(
@@ -537,25 +537,17 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                 builder: (context, state) => const ContactUsPage(),
               ),
               GoRoute(
-                path: 'suppliers',
-                builder: (context, state) => const SupplierListPage(),
-                routes: [
-                  GoRoute(
-                    path: ':supplierId/edit',
-                    builder: (context, state) => EditSupplierPage(
-                      supplierId: state.pathParameters['supplierId']!,
-                    ),
-                  ),
-                ],
-              ),
-              GoRoute(
                 path: 'purchases',
                 builder: (context, state) {
                   final tab = state.uri.queryParameters['tab'];
+                  final supplierId = state.uri.queryParameters['supplier'];
                   final initial = tab == 'new'
                       ? PurchasesHubTab.newPurchase
                       : PurchasesHubTab.drafts;
-                  return PurchasesHubPage(initialTab: initial);
+                  return PurchasesHubPage(
+                    initialTab: initial,
+                    initialSupplierId: supplierId,
+                  );
                 },
                 routes: [
                   GoRoute(
@@ -577,14 +569,30 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               ),
               GoRoute(
                 path: 'dashboard',
-                builder: (context, state) => const DashboardHomePage(),
+                redirect: (context, state) => '/pharmacy/reports',
               ),
               GoRoute(
                 path: 'reports',
-                builder: (context, state) => const ReportsHomePage(),
+                builder: (context, state) => unifiedReportsPageFromState(state),
                 routes: [
                   GoRoute(
                     path: ':reportType',
+                    redirect: (context, state) {
+                      final t = state.pathParameters['reportType'] ?? '';
+                      const redirectTypes = {
+                        'sales_unified',
+                        'sales_summary',
+                        'profit_summary',
+                        'sales_by_staff',
+                      };
+                      if (redirectTypes.contains(t)) {
+                        if (t == 'sales_by_staff') {
+                          return '/pharmacy/reports?view=staff';
+                        }
+                        return '/pharmacy/reports';
+                      }
+                      return null;
+                    },
                     builder: (context, state) {
                       final t = state.pathParameters['reportType']!;
                       return ReportViewerPage(reportType: t);

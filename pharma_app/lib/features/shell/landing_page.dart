@@ -37,7 +37,7 @@ class LandingPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Ethiopia pharmacy operations',
+                  'Pharmacy operations',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),

@@ -13,6 +13,7 @@ List<Map<String, dynamic>> rankMedicines(
     final barcode = (m['barcode'] as String? ?? '').toLowerCase();
     final name = (m['name'] as String? ?? '').toLowerCase();
     final gen = (m['generic_name'] as String? ?? '').toLowerCase();
+    final details = medicineDetailParts(m).join(' ').toLowerCase();
     if (barcode == t) return 0;
     if (code == t) return 0;
     if (name.startsWith(t)) return 1;
@@ -23,6 +24,8 @@ List<Map<String, dynamic>> rankMedicines(
     if (code.startsWith(t)) return 5;
     if (barcode.contains(t)) return 6;
     if (code.contains(t)) return 6;
+    if (details.startsWith(t)) return 7;
+    if (details.contains(t)) return 8;
     return 99;
   }
 
@@ -34,6 +37,137 @@ List<Map<String, dynamic>> rankMedicines(
       return (a['name'] as String? ?? '').compareTo(b['name'] as String? ?? '');
     });
   return copy.where((m) => score(m) < 99).toList();
+}
+
+String medicineText(Map<String, dynamic> row, String key) {
+  return row[key]?.toString().trim() ?? '';
+}
+
+List<String> medicineDetailParts(Map<String, dynamic> row) {
+  return [
+    medicineText(row, 'country'),
+    medicineText(row, 'manual_code'),
+  ].where((value) => value.isNotEmpty).toList(growable: false);
+}
+
+Widget? medicineSearchSubtitle(
+  BuildContext context,
+  Map<String, dynamic> row, {
+  String? leadingMessage,
+  TextStyle? leadingStyle,
+}) {
+  final generic = medicineText(row, 'generic_name');
+  final details = medicineDetailParts(row);
+  if (leadingMessage == null && generic.isEmpty && details.isEmpty) {
+    return null;
+  }
+  final textTheme = Theme.of(context).textTheme;
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      if (leadingMessage != null)
+        Text(
+          leadingMessage,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: leadingStyle,
+        ),
+      if (generic.isNotEmpty)
+        Text(
+          generic,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: textTheme.bodyMedium,
+        ),
+      if (details.isNotEmpty)
+        Text(
+          details.join(' · '),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: textTheme.bodySmall,
+        ),
+    ],
+  );
+}
+
+class MedicineSearchResultTile extends StatelessWidget {
+  const MedicineSearchResultTile({
+    super.key,
+    required this.row,
+    required this.onTap,
+    this.leadingMessage,
+    this.leadingStyle,
+  });
+
+  final Map<String, dynamic> row;
+  final VoidCallback onTap;
+  final String? leadingMessage;
+  final TextStyle? leadingStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final name = medicineText(row, 'name');
+    final generic = medicineText(row, 'generic_name');
+    final country = medicineText(row, 'country');
+    final code = medicineText(row, 'manual_code');
+    final barcode = medicineText(row, 'barcode');
+    final meta = [
+      if (country.isNotEmpty) country,
+      if (code.isNotEmpty) 'Code $code',
+      if (barcode.isNotEmpty) 'Barcode $barcode',
+    ].join(' · ');
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              name.isEmpty ? 'Medicine' : name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                height: 1.15,
+              ),
+            ),
+            if (generic.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                generic,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                  height: 1.15,
+                ),
+              ),
+            ],
+            if (leadingMessage != null || meta.isNotEmpty) ...[
+              const SizedBox(height: 3),
+              Text(
+                [?leadingMessage, if (meta.isNotEmpty) meta].join(' · '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    (leadingMessage != null ? leadingStyle : null) ??
+                    theme.textTheme.labelSmall?.copyWith(
+                      color: cs.onSurfaceVariant.withValues(alpha: 0.82),
+                      height: 1.1,
+                    ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 typedef MedicinePicked = void Function(Map<String, dynamic> medicine);
@@ -100,7 +234,7 @@ class _MedicineSearchBarState extends State<MedicineSearchBar> {
     }
     final broad = _all.where((m) {
       final s =
-          '${m['manual_code']} ${m['barcode']} ${m['name']} ${m['generic_name']}'
+          '${m['manual_code']} ${m['barcode']} ${m['name']} ${m['generic_name']} ${medicineDetailParts(m).join(' ')}'
               .toLowerCase();
       return s.contains(q.trim().toLowerCase());
     }).toList();
@@ -137,23 +271,25 @@ class _MedicineSearchBarState extends State<MedicineSearchBar> {
         ),
         if (_shown.isNotEmpty)
           Material(
-            elevation: 2,
+            elevation: 6,
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 220),
-              child: ListView.builder(
+              constraints: const BoxConstraints(maxHeight: 280),
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(vertical: 4),
                 shrinkWrap: true,
                 itemCount: _shown.length,
+                separatorBuilder: (context, index) => Divider(
+                  height: 1,
+                  indent: 12,
+                  endIndent: 12,
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
                 itemBuilder: (context, i) {
                   final m = _shown[i];
-                  return ListTile(
-                    dense: true,
-                    title: Text(m['name'] as String? ?? ''),
-                    subtitle: Text(
-                      [
-                        m['manual_code'] as String? ?? '',
-                        m['barcode'] as String? ?? '',
-                      ].where((e) => e.isNotEmpty).join(' · '),
-                    ),
+                  return MedicineSearchResultTile(
+                    row: m,
                     onTap: () => widget.onMedicineSelected(m),
                   );
                 },

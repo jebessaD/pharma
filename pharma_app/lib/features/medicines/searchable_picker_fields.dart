@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/utils/date_formatters.dart';
+import 'medicine_search_bar.dart';
 
 typedef RowPicked = void Function(Map<String, dynamic> row);
 
@@ -9,6 +10,7 @@ int _medicineRank(Map<String, dynamic> row, String q) {
   final code = (row['manual_code'] as String? ?? '').toLowerCase();
   final barcode = (row['barcode'] as String? ?? '').toLowerCase();
   final generic = (row['generic_name'] as String? ?? '').toLowerCase();
+  final details = _medicineDetailParts(row).join(' ').toLowerCase();
 
   if (name == q || code == q || barcode == q) return 0;
   if (name.startsWith(q)) return 1;
@@ -17,7 +19,20 @@ int _medicineRank(Map<String, dynamic> row, String q) {
   if (name.contains(q)) return 4;
   if (code.contains(q) || barcode.contains(q)) return 5;
   if (generic.contains(q)) return 6;
+  if (details.startsWith(q)) return 7;
+  if (details.contains(q)) return 8;
   return 99;
+}
+
+String _medicineText(Map<String, dynamic> row, String key) {
+  return row[key]?.toString().trim() ?? '';
+}
+
+List<String> _medicineDetailParts(Map<String, dynamic> row) {
+  return [
+    _medicineText(row, 'country'),
+    _medicineText(row, 'manual_code'),
+  ].where((value) => value.isNotEmpty).toList(growable: false);
 }
 
 int _batchRank(Map<String, dynamic> row, String q) {
@@ -114,22 +129,20 @@ class _MedicineAutocompleteFieldState extends State<MedicineAutocompleteField> {
       optionsBuilder: (value) {
         final q = value.text.trim().toLowerCase();
         if (q.isEmpty) return widget.rows.take(15);
-        final matched = widget.rows
-            .where((row) {
+        final matched =
+            widget.rows.where((row) {
               final s =
-                  '${row['name'] ?? ''} ${row['manual_code'] ?? ''} ${row['barcode'] ?? ''} ${row['generic_name'] ?? ''}'
+                  '${row['name'] ?? ''} ${row['manual_code'] ?? ''} ${row['barcode'] ?? ''} ${row['generic_name'] ?? ''} ${_medicineDetailParts(row).join(' ')}'
                       .toLowerCase();
               return s.contains(q);
-            })
-            .toList()
-          ..sort((a, b) {
-            final ar = _medicineRank(a, q);
-            final br = _medicineRank(b, q);
-            if (ar != br) return ar.compareTo(br);
-            return (a['name'] as String? ?? '').compareTo(
-              b['name'] as String? ?? '',
-            );
-          });
+            }).toList()..sort((a, b) {
+              final ar = _medicineRank(a, q);
+              final br = _medicineRank(b, q);
+              if (ar != br) return ar.compareTo(br);
+              return (a['name'] as String? ?? '').compareTo(
+                b['name'] as String? ?? '',
+              );
+            });
         return matched.take(20);
       },
       onSelected: (row) {
@@ -162,24 +175,25 @@ class _MedicineAutocompleteFieldState extends State<MedicineAutocompleteField> {
         return Align(
           alignment: Alignment.topLeft,
           child: Material(
-            elevation: 4,
+            elevation: 6,
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 260, minWidth: 320),
-              child: ListView.builder(
-                padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(maxHeight: 300, minWidth: 360),
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(vertical: 4),
                 shrinkWrap: true,
                 itemCount: items.length,
+                separatorBuilder: (context, index) => Divider(
+                  height: 1,
+                  indent: 12,
+                  endIndent: 12,
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
                 itemBuilder: (context, index) {
                   final row = items[index];
-                  final code = row['manual_code'] as String? ?? '';
-                  final barcode = row['barcode'] as String? ?? '';
-                  final name = row['name'] as String? ?? '';
-                  return ListTile(
-                    dense: true,
-                    title: Text(name),
-                    subtitle: Text(
-                      [code, barcode].where((e) => e.isNotEmpty).join(' · '),
-                    ),
+                  return MedicineSearchResultTile(
+                    row: row,
                     onTap: () => onSelected(row),
                   );
                 },
@@ -263,21 +277,19 @@ class _BatchAutocompleteFieldState extends State<BatchAutocompleteField> {
       optionsBuilder: (value) {
         final q = value.text.trim().toLowerCase();
         if (q.isEmpty) return widget.rows.take(20);
-        final matched = widget.rows
-            .where((row) {
+        final matched =
+            widget.rows.where((row) {
               final s = '${row['batch_no'] ?? ''} ${row['expiry_date'] ?? ''}'
                   .toLowerCase();
               return s.contains(q);
-            })
-            .toList()
-          ..sort((a, b) {
-            final ar = _batchRank(a, q);
-            final br = _batchRank(b, q);
-            if (ar != br) return ar.compareTo(br);
-            return (a['batch_no'] as String? ?? '').compareTo(
-              b['batch_no'] as String? ?? '',
-            );
-          });
+            }).toList()..sort((a, b) {
+              final ar = _batchRank(a, q);
+              final br = _batchRank(b, q);
+              if (ar != br) return ar.compareTo(br);
+              return (a['batch_no'] as String? ?? '').compareTo(
+                b['batch_no'] as String? ?? '',
+              );
+            });
         return matched.take(20);
       },
       onSelected: (row) {

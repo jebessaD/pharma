@@ -9,6 +9,7 @@ import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/widgets/app_feedback.dart';
 import '../../core/widgets/app_text_form_field.dart';
 import '../../core/widgets/form_error_banner.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 
 class CreateBranchPage extends ConsumerStatefulWidget {
   const CreateBranchPage({super.key});
@@ -78,12 +79,12 @@ class _CreateBranchPageState extends ConsumerState<CreateBranchPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('New branch')),
+      appBar: pharmacyPageAppBar(context, title: 'New branch'),
       body: SafeArea(
         child: Form(
           key: _formKey,
           child: ListView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
             children: [
               AppTextFormField(
                 controller: _name,
