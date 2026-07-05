@@ -36,7 +36,7 @@ class ReportDateFilterBar extends StatelessWidget {
         : const [
             (ReportDatePreset.today, 'Today'),
             (ReportDatePreset.last7, '7 days'),
-            (ReportDatePreset.thisMonth, 'Month'),
+            (ReportDatePreset.last30, 'Last 30 days'),
             (ReportDatePreset.thisYear, 'Year'),
             (ReportDatePreset.lifetime, 'Lifetime'),
           ];
@@ -253,7 +253,7 @@ class _ScrollHintButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Material(
-      color: ReportPalette.cardWhite,
+      color: cs.surface,
       borderRadius: BorderRadius.circular(10),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -266,7 +266,7 @@ class _ScrollHintButton extends StatelessWidget {
           child: SizedBox(
             width: 28,
             height: 36,
-            child: Icon(icon, size: 20, color: ReportPalette.forest),
+            child: Icon(icon, size: 20, color: cs.primary),
           ),
         ),
       ),
@@ -285,7 +285,7 @@ class _FilterIconButton extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final active = count > 0;
     return Material(
-      color: active ? ReportPalette.cardWhite : ReportPalette.cardWhite,
+      color: cs.surface,
       borderRadius: ReportUi.radiusMd,
       child: InkWell(
         borderRadius: ReportUi.radiusMd,
@@ -293,9 +293,9 @@ class _FilterIconButton extends StatelessWidget {
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: ReportUi.radiusMd,
-            color: Colors.white,
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.2),
             border: Border.all(
-              color: active ? ReportPalette.green : ReportUi.hairline(cs),
+              color: active ? cs.primary : ReportUi.hairline(cs),
               width: active ? 1.5 : 1,
             ),
           ),
@@ -393,7 +393,7 @@ class ReportSearchField extends StatelessWidget {
                         onPressed: onClear,
                       ),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.25),
                 border: OutlineInputBorder(
                   borderRadius: ReportUi.radiusMd,
                   borderSide: BorderSide(color: ReportUi.hairline(cs)),
@@ -420,7 +420,7 @@ class ReportSearchField extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: cs.surfaceContainerHighest.withValues(alpha: 0.25),
               borderRadius: ReportUi.radiusMd,
               border: Border.all(color: ReportUi.hairline(cs)),
             ),
@@ -428,7 +428,7 @@ class ReportSearchField extends StatelessWidget {
               '$resultCount',
               style: t.textTheme.labelLarge?.copyWith(
                 fontWeight: FontWeight.w700,
-                color: ReportPalette.forest,
+                color: cs.primary,
               ),
             ),
           ),

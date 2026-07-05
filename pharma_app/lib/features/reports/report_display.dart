@@ -217,14 +217,14 @@ class ProfitSummaryGrid extends StatelessWidget {
               'Gain',
               formatReportCell('revenue', row['revenue']),
               Icons.trending_up_rounded,
-              ReportPalette.green,
+              cs.primary,
             ),
             const SizedBox(width: 10),
             stat(
               'Spent',
               formatReportCell('cogs', row['cogs']),
               Icons.payments_outlined,
-              ReportPalette.alert,
+              ReportPalette.alert(cs),
             ),
           ],
         ),
@@ -235,14 +235,14 @@ class ProfitSummaryGrid extends StatelessWidget {
               'Profit',
               formatReportCell('gross_profit', row['gross_profit']),
               Icons.savings_outlined,
-              const Color(0xFF15803D),
+              cs.primary,
             ),
             const SizedBox(width: 10),
             stat(
               'Sales',
               formatReportCell('sale_count', row['sale_count']),
               Icons.receipt_long_outlined,
-              ReportPalette.blue,
+              ReportPalette.blue(cs),
             ),
           ],
         ),
@@ -389,6 +389,24 @@ class _ReportDataTableState extends State<ReportDataTable> {
     final cs = t.colorScheme;
     final sorted = _sortedRows;
 
+    if (widget.keys.isEmpty || sorted.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+          decoration: ReportUi.surfaceCard(cs),
+          child: Text(
+            'No rows to show.',
+            textAlign: TextAlign.center,
+            style: t.textTheme.bodyMedium?.copyWith(
+              color: ReportUi.mutedText(cs),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       child: Container(
@@ -533,11 +551,11 @@ class ReportRowCard extends StatelessWidget {
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cs.surface,
         borderRadius: ReportUi.radiusLg,
         border: Border.all(
           color: isTotal
-              ? ReportPalette.green.withValues(alpha: 0.35)
+              ? cs.primary.withValues(alpha: 0.35)
               : ReportUi.hairline(cs),
           width: isTotal ? 1.5 : 1,
         ),
@@ -556,12 +574,10 @@ class ReportRowCard extends StatelessWidget {
                     height: 28,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: rank == 1
-                            ? ReportPalette.green
-                            : ReportUi.hairline(cs),
+                        color: rank == 1 ? cs.primary : ReportUi.hairline(cs),
                         width: rank == 1 ? 1.5 : 1,
                       ),
                     ),
@@ -569,9 +585,7 @@ class ReportRowCard extends StatelessWidget {
                       '$rank',
                       style: t.textTheme.labelMedium?.copyWith(
                         fontWeight: FontWeight.w700,
-                        color: rank == 1
-                            ? ReportPalette.forest
-                            : ReportPalette.label,
+                        color: rank == 1 ? cs.primary : cs.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -595,7 +609,7 @@ class ReportRowCard extends StatelessWidget {
                     style: t.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: isTotal || reportType == 'sales_by_staff'
-                          ? ReportPalette.green
+                          ? cs.primary
                           : cs.onSurface,
                     ),
                   ),
@@ -667,7 +681,7 @@ class _SalesLineCard extends StatelessWidget {
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cs.surface,
         borderRadius: ReportUi.radiusMd,
         border: Border.all(color: ReportUi.hairline(cs)),
       ),

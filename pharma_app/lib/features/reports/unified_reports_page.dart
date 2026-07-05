@@ -169,7 +169,7 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
       }
     } else if (_dateRange.preset != ReportDatePreset.today &&
         _dateRange.preset != ReportDatePreset.last7 &&
-        _dateRange.preset != ReportDatePreset.thisMonth) {
+        _dateRange.preset != ReportDatePreset.last30) {
       count++;
     }
     if (_selectedSellerId != null) count++;
@@ -397,6 +397,7 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
 
   List<Map<String, dynamic>> get _displayRows {
     if (_view == _ResultsView.table) {
+      if (_itemRows.isEmpty) return const [];
       final summary = unifiedSummaryRowFromStats(_salesStats);
       if (summary != null) return [..._itemRows, summary];
     }
@@ -429,7 +430,7 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
     setState(() {
       if (result.clearAll) {
         _dateRange.applyPreset(
-          _isPharmacist ? ReportDatePreset.today : ReportDatePreset.thisMonth,
+          _isPharmacist ? ReportDatePreset.today : ReportDatePreset.last30,
         );
         _selectedSellerId = null;
         _selectedPaymentMethod = null;
@@ -466,6 +467,7 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
 
   Widget _compactHeader(BuildContext context, String branchLabel) {
     final t = Theme.of(context);
+    final cs = t.colorScheme;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -477,7 +479,7 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
                 branchLabel,
                 style: t.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700,
-                  color: ReportPalette.forest,
+                  color: cs.onSurface,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -487,7 +489,7 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
                     ? 'Not updated yet'
                     : 'Updated ${formatDdMmYyyyHm(_lastUpdated)}',
                 style: t.textTheme.labelSmall?.copyWith(
-                  color: ReportPalette.label,
+                  color: ReportUi.mutedText(cs),
                 ),
               ),
             ],
@@ -496,7 +498,7 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
         IconButton(
           tooltip: 'Refresh',
           onPressed: _loading ? null : _loadAll,
-          icon: Icon(Icons.refresh_rounded, color: ReportPalette.forest),
+          icon: Icon(Icons.refresh_rounded, color: cs.primary),
         ),
       ],
     );
@@ -574,7 +576,7 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
                 stockValue,
                 '/pharmacy/stock',
                 Icons.inventory_2_outlined,
-                ReportPalette.green,
+                cs.primary,
               ),
               Divider(height: 1, indent: 56, color: ReportUi.hairline(cs)),
               attentionTile(
@@ -582,8 +584,8 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
                 '$low items',
                 '/pharmacy/stock?tab=low',
                 Icons.warning_amber_rounded,
-                ReportPalette.amber,
-                valueColor: lowCount > 0 ? ReportPalette.alert : null,
+                ReportPalette.amber(cs),
+                valueColor: lowCount > 0 ? ReportPalette.alert(cs) : null,
               ),
               Divider(height: 1, indent: 56, color: ReportUi.hairline(cs)),
               attentionTile(
@@ -591,8 +593,8 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
                 '$near batches',
                 '/pharmacy/expiry?tab=near',
                 Icons.event_note_rounded,
-                ReportPalette.blue,
-                valueColor: nearCount > 0 ? ReportPalette.forest : null,
+                ReportPalette.blue(cs),
+                valueColor: nearCount > 0 ? cs.primary : null,
               ),
               Divider(height: 1, indent: 56, color: ReportUi.hairline(cs)),
               attentionTile(
@@ -600,9 +602,9 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
                 '$expired batches',
                 '/pharmacy/expiry?tab=expired',
                 Icons.event_busy_rounded,
-                ReportPalette.alert,
+                ReportPalette.alert(cs),
                 valueColor: expiredCount > 0
-                    ? ReportPalette.alert
+                    ? ReportPalette.alert(cs)
                     : ReportUi.mutedText(cs),
               ),
             ],
@@ -737,7 +739,7 @@ class _UnifiedReportsPageState extends ConsumerState<UnifiedReportsPage> {
           Expanded(
             child: RefreshIndicator(
               onRefresh: _loadAll,
-              color: ReportPalette.green,
+              color: cs.primary,
               child: CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [

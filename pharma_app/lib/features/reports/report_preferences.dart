@@ -24,7 +24,7 @@ abstract final class ReportPreferences {
     final preset = parsePreset(prefs.getString(keyDatePreset));
     final fallback = pharmacistMode
         ? ReportDatePreset.today
-        : ReportDatePreset.thisMonth;
+        : ReportDatePreset.last30;
     final range = ReportDateRange.initial(preset: preset ?? fallback);
 
     if (range.preset == ReportDatePreset.custom) {

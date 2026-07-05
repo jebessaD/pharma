@@ -1,27 +1,27 @@
 import 'package:flutter/material.dart';
 
-/// Forest green accents on clean white cards.
+/// Accent helpers; prefer [ColorScheme] via [ReportUi] for surfaces and text.
 abstract final class ReportPalette {
-  static const forest = Color(0xFF1B4332);
-  static const green = Color(0xFF40916C);
-  static const pageBg = Color(0xFFF5F5F5);
-  static const label = Color(0xFF6B7280);
-  static const alert = Color(0xFFDC2626);
-  static const amber = Color(0xFFD97706);
-  static const blue = Color(0xFF2563EB);
-  static const cardWhite = Colors.white;
-  static const iconWell = Colors.white;
+  static Color primary(ColorScheme cs) => cs.primary;
+
+  static Color onSurface(ColorScheme cs) => cs.onSurface;
+
+  static Color alert(ColorScheme cs) => cs.error;
+
+  static Color amber(ColorScheme cs) => const Color(0xFFD97706);
+
+  static Color blue(ColorScheme cs) => cs.tertiary;
 }
 
 abstract final class ReportUi {
   static Color pageBackground(ColorScheme cs) => cs.surface;
 
-  static Color cardFill(ColorScheme cs) => ReportPalette.cardWhite;
+  static Color cardFill(ColorScheme cs) => cs.surface;
 
   static Color hairline(ColorScheme cs) =>
-      cs.outlineVariant.withValues(alpha: 0.2);
+      cs.outlineVariant.withValues(alpha: 0.45);
 
-  static Color mutedText(ColorScheme cs) => ReportPalette.label;
+  static Color mutedText(ColorScheme cs) => cs.onSurfaceVariant;
 
   static BorderRadius get radiusLg => BorderRadius.circular(18);
 
@@ -43,7 +43,7 @@ abstract final class ReportUi {
 
   static BoxDecoration insetPanel(ColorScheme cs) {
     return BoxDecoration(
-      color: ReportPalette.cardWhite,
+      color: cs.surfaceContainerHighest.withValues(alpha: 0.25),
       borderRadius: radiusMd,
       border: Border.all(color: hairline(cs)),
     );
@@ -51,15 +51,15 @@ abstract final class ReportUi {
 
   static BoxDecoration iconWellBorder(ColorScheme cs) {
     return BoxDecoration(
-      color: ReportPalette.iconWell,
+      color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
       borderRadius: radiusSm,
       border: Border.all(color: hairline(cs)),
     );
   }
 
-  static TextStyle captionLabel(TextTheme t, {Color? color}) {
+  static TextStyle captionLabel(TextTheme t, ColorScheme cs, {Color? color}) {
     return t.labelSmall!.copyWith(
-      color: color ?? ReportPalette.label,
+      color: color ?? cs.onSurfaceVariant,
       fontWeight: FontWeight.w600,
       letterSpacing: 0.6,
     );
@@ -67,10 +67,10 @@ abstract final class ReportUi {
 
   static ButtonStyle segmentedStyle(ColorScheme cs, TextTheme textTheme) {
     return SegmentedButton.styleFrom(
-      backgroundColor: ReportPalette.cardWhite,
-      selectedBackgroundColor: ReportPalette.cardWhite,
-      selectedForegroundColor: ReportPalette.forest,
-      foregroundColor: ReportPalette.label,
+      backgroundColor: cs.surfaceContainerHighest.withValues(alpha: 0.25),
+      selectedBackgroundColor: cs.primaryContainer.withValues(alpha: 0.55),
+      selectedForegroundColor: cs.primary,
+      foregroundColor: cs.onSurfaceVariant,
       side: BorderSide(color: hairline(cs)),
       elevation: 0,
       shadowColor: Colors.transparent,
@@ -85,21 +85,22 @@ abstract final class ReportUi {
     String trailing = 'Report active',
   }) {
     final t = Theme.of(context);
+    final cs = t.colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         children: [
-          Icon(Icons.monitor_heart_outlined, size: 18, color: ReportPalette.green),
+          Icon(Icons.monitor_heart_outlined, size: 18, color: cs.primary),
           const SizedBox(width: 8),
           Text(
             'LIVE STATS',
-            style: captionLabel(t.textTheme, color: ReportPalette.label),
+            style: captionLabel(t.textTheme, cs, color: mutedText(cs)),
           ),
           const Spacer(),
           Text(
             trailing,
             style: t.textTheme.labelSmall?.copyWith(
-              color: ReportPalette.label.withValues(alpha: 0.75),
+              color: mutedText(cs).withValues(alpha: 0.85),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -110,6 +111,7 @@ abstract final class ReportUi {
 
   static Widget sectionTitle(BuildContext context, String title) {
     final t = Theme.of(context);
+    final cs = t.colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
@@ -118,7 +120,7 @@ abstract final class ReportUi {
             width: 4,
             height: 22,
             decoration: BoxDecoration(
-              color: ReportPalette.forest,
+              color: cs.primary,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -127,7 +129,7 @@ abstract final class ReportUi {
             title,
             style: t.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w700,
-              color: ReportPalette.forest,
+              color: cs.onSurface,
               letterSpacing: -0.2,
             ),
           ),
@@ -150,7 +152,7 @@ abstract final class ReportUi {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: captionLabel(t.textTheme)),
+          Text(label, style: captionLabel(t.textTheme, cs)),
           const SizedBox(height: 8),
           Text(
             value,
@@ -198,7 +200,8 @@ abstract final class ReportUi {
 
   static Widget _metricTile(BuildContext context, ReportMetricTileData tile) {
     final t = Theme.of(context);
-    final valueColor = tile.valueColor ?? Colors.black;
+    final cs = t.colorScheme;
+    final valueColor = tile.valueColor ?? cs.onSurface;
     return Material(
       color: tile.background ?? Colors.transparent,
       child: InkWell(
@@ -208,7 +211,7 @@ abstract final class ReportUi {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(tile.label, style: captionLabel(t.textTheme)),
+              Text(tile.label, style: captionLabel(t.textTheme, cs)),
               const SizedBox(height: 8),
               Text(
                 tile.value,
@@ -257,8 +260,9 @@ class ReportDateChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
+    final cs = t.colorScheme;
     return Material(
-      color: Colors.white,
+      color: cs.surface,
       borderRadius: ReportUi.radiusMd,
       child: InkWell(
         onTap: onTap,
@@ -266,11 +270,11 @@ class ReportDateChip extends StatelessWidget {
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: ReportUi.radiusMd,
-            color: Colors.white,
+            color: selected
+                ? cs.primaryContainer.withValues(alpha: 0.45)
+                : cs.surfaceContainerHighest.withValues(alpha: 0.2),
             border: Border.all(
-              color: selected
-                  ? ReportPalette.green
-                  : ReportUi.hairline(Theme.of(context).colorScheme),
+              color: selected ? cs.primary : ReportUi.hairline(cs),
               width: selected ? 1.5 : 1,
             ),
           ),
@@ -280,7 +284,7 @@ class ReportDateChip extends StatelessWidget {
               label,
               style: t.textTheme.labelLarge?.copyWith(
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: selected ? ReportPalette.forest : ReportPalette.label,
+                color: selected ? cs.primary : cs.onSurfaceVariant,
               ),
             ),
           ),

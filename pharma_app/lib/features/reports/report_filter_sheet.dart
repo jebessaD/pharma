@@ -127,7 +127,7 @@ class _ReportFilterSheetState extends State<ReportFilterSheet> {
         dateRange: ReportDateRange.initial(
           preset: widget.isPharmacist
               ? ReportDatePreset.today
-              : ReportDatePreset.thisMonth,
+              : ReportDatePreset.last30,
         ),
       ),
     );
@@ -247,7 +247,7 @@ class _ReportFilterSheetState extends State<ReportFilterSheet> {
                 child: FilledButton(
                   onPressed: _apply,
                   style: FilledButton.styleFrom(
-                    backgroundColor: ReportPalette.forest,
+                    backgroundColor: cs.primary,
                   ),
                   child: const Text('Apply'),
                 ),
@@ -273,7 +273,7 @@ class _ReportFilterSheetState extends State<ReportFilterSheet> {
                       child: ListTile(
                         leading: Icon(
                           Icons.date_range_rounded,
-                          color: ReportPalette.green,
+                          color: cs.primary,
                         ),
                         title: Text(
                           '${formatDdMmYyyy(_range.from)} – ${formatDdMmYyyy(_range.to)}',
@@ -356,7 +356,7 @@ class _ReportFilterSheetState extends State<ReportFilterSheet> {
                         ),
                         title: const Text('Price overrides only'),
                         value: _overridesOnly,
-                        activeThumbColor: ReportPalette.green,
+                        activeThumbColor: cs.primary,
                         onChanged: (v) => setState(() => _overridesOnly = v),
                       ),
                     ),
@@ -376,7 +376,7 @@ class _ReportFilterSheetState extends State<ReportFilterSheet> {
                             child: ListTile(
                               leading: Icon(
                                 Icons.category_outlined,
-                                color: ReportPalette.blue,
+                                color: ReportPalette.blue(cs),
                               ),
                               title: const Text('Medicine categories'),
                               subtitle: Text(
@@ -470,7 +470,7 @@ class _SheetShell extends StatelessWidget {
                       title,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w700,
-                        color: ReportPalette.forest,
+                        color: cs.onSurface,
                       ),
                     ),
                   ),
@@ -524,7 +524,7 @@ class _FilterSection extends StatelessWidget {
           title,
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
             fontWeight: FontWeight.w700,
-            color: ReportPalette.forest,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         const SizedBox(height: 10),

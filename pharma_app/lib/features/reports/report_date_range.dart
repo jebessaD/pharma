@@ -25,7 +25,7 @@ class ReportDateRange {
 
   static DateTime dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
-  factory ReportDateRange.initial({ReportDatePreset preset = ReportDatePreset.thisMonth}) {
+  factory ReportDateRange.initial({ReportDatePreset preset = ReportDatePreset.last30}) {
     final range = ReportDateRange(
       preset: preset,
       from: dateOnly(DateTime.now()),
