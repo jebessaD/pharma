@@ -1,0 +1,262 @@
+[
+  {
+    "generic_name": "OCTREOTIDE",
+    "dosage_form": "Injection",
+    "strength": "50mcg/ml",
+    "subcategory": "GI.300. Medicines for Upper GI Bleeding",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "OCTREOTIDE",
+    "dosage_form": "Injection",
+    "strength": "100mcg/ml",
+    "subcategory": "GI.300. Medicines for Upper GI Bleeding",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "OCTREOTIDE",
+    "dosage_form": "Injection",
+    "strength": "200mcg/ml",
+    "subcategory": "GI.300. Medicines for Upper GI Bleeding",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "OCTREOTIDE",
+    "dosage_form": "Injection",
+    "strength": "500mcg/ml",
+    "subcategory": "GI.300. Medicines for Upper GI Bleeding",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "APREPITANT",
+    "dosage_form": "Capsule",
+    "strength": "80mg",
+    "subcategory": "GI.500. Antiemetic Medicines",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "APREPITANT",
+    "dosage_form": "Capsule",
+    "strength": "125mg",
+    "subcategory": "GI.500. Antiemetic Medicines",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "APREPITANT",
+    "dosage_form": "Capsule",
+    "strength": "165mg",
+    "subcategory": "GI.500. Antiemetic Medicines",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "DOXYLAMINE + PYRIDOXINE",
+    "dosage_form": "Tablet",
+    "strength": "10mg + 10mg",
+    "subcategory": "GI.500. Antiemetic Medicines",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "LACTULOSE",
+    "dosage_form": "Oral solution",
+    "strength": "10g/15ml",
+    "subcategory": "GI.600. Cathartics and Laxatives",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "POLYETHYLENE GLYCOL (PEG)",
+    "dosage_form": "Powder",
+    "strength": "17gm per oral dose",
+    "subcategory": "GI.600. Cathartics and Laxatives",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "ZINC SULFATE",
+    "dosage_form": "Tablet dispersible",
+    "strength": "10mg",
+    "subcategory": "GI.700. Medicines Used in Diarrhea",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "ZINC SULFATE",
+    "dosage_form": "Tablet dispersible",
+    "strength": "20mg",
+    "subcategory": "GI.700. Medicines Used in Diarrhea",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "LOSARTAN",
+    "dosage_form": "Tablet",
+    "strength": "25mg",
+    "subcategory": "CV.300 Antihypertensives",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "LOSARTAN",
+    "dosage_form": "Tablet",
+    "strength": "50mg",
+    "subcategory": "CV.300 Antihypertensives",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "PROPOFOL",
+    "dosage_form": "Injection",
+    "strength": "10mg/ml",
+    "subcategory": "AP.102. Intravenous Anesthetics",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "ATRACURIUM",
+    "dosage_form": "Injection",
+    "strength": "10mg/ml",
+    "subcategory": "MR.000 Muscle Relaxants",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "ALLOPURINOL",
+    "dosage_form": "Tablet",
+    "strength": "100mg",
+    "subcategory": "DJ.000 Medicines for Diseases of Joint",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "ALLOPURINOL",
+    "dosage_form": "Tablet",
+    "strength": "300mg",
+    "subcategory": "DJ.000 Medicines for Diseases of Joint",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "ADRENALINE",
+    "dosage_form": "Injection",
+    "strength": "1mg/ml",
+    "subcategory": "AL.000 Anti-allergic Medicines",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "LEVOTHYROXINE",
+    "dosage_form": "Tablet",
+    "strength": "25mcg",
+    "subcategory": "ED.000 Medicines Used in Endocrine Disorders",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "LEVOTHYROXINE",
+    "dosage_form": "Tablet",
+    "strength": "50mcg",
+    "subcategory": "ED.000 Medicines Used in Endocrine Disorders",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "LEVOTHYROXINE",
+    "dosage_form": "Tablet",
+    "strength": "100mcg",
+    "subcategory": "ED.000 Medicines Used in Endocrine Disorders",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "MEDROXYPROGESTERONE ACETATE",
+    "dosage_form": "Injection",
+    "strength": "150mg/ml",
+    "subcategory": "RH.000 Reproductive Health",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "ETONOGESTREL",
+    "dosage_form": "Implant",
+    "strength": "68mg",
+    "subcategory": "RH.104 Implantable Contraceptives",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "TRANEXAMIC ACID",
+    "dosage_form": "Injection",
+    "strength": "500mg",
+    "subcategory": "BL.200 Medicines Affecting Coagulation",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  },
+  {
+    "generic_name": "TRANEXAMIC ACID",
+    "dosage_form": "Tablet",
+    "strength": "500mg",
+    "subcategory": "BL.200 Medicines Affecting Coagulation",
+    "company": "",
+    "country": "",
+    "brand_name": "",
+    "manufacturer": ""
+  }
+]
