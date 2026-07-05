@@ -17,6 +17,7 @@ bool homeReportsEnabledForRole(String role) {
   };
 }
 
+
 String formatHomeReportValue(String key, Object? value) {
   final raw = value ?? '';
   final s = '$raw'.trim();
