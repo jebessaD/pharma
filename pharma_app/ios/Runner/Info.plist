@@ -50,7 +50,9 @@
 		<key>NSPhotoLibraryAddUsageDescription</key>
 		<string>Pharma Shelf saves receipt images to your photo library when you download a receipt.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
-		<string>Pharma Shelf needs access to save receipt images to your photo library.</string>
+		<string>Pharma Shelf needs access to your photos to save receipts and to import stock from invoice photos.</string>
+		<key>NSCameraUsageDescription</key>
+		<string>Pharma Shelf uses the camera to scan barcodes and to photograph invoices for stock import.</string>
 		<key>CFBundleURLTypes</key>
 		<array>
 			<dict>

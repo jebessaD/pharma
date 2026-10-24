@@ -4,14 +4,16 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/app_assets.dart';
+import '../../core/auth/auth_persistence.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/registration/registration_location.dart';
-import '../../core/auth/auth_persistence.dart';
 import '../../core/shared_preferences_provider.dart';
 import '../../core/supabase_config.dart';
+import '../../core/validation/phone.dart';
 import '../../core/widgets/form_error_banner.dart';
 import '../../core/widgets/pharmacy_page_app_bar.dart';
+import 'apply_team_phone.dart';
 
 class SignupPage extends ConsumerStatefulWidget {
   const SignupPage({super.key});
@@ -26,6 +28,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
   final _password = TextEditingController();
   final _fullName = TextEditingController();
   final _teamName = TextEditingController();
+  final _phone = TextEditingController();
   bool _obscurePassword = true;
   bool _loading = false;
   bool _resending = false;
@@ -39,6 +42,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
     _password.dispose();
     _fullName.dispose();
     _teamName.dispose();
+    _phone.dispose();
     super.dispose();
   }
 
@@ -55,6 +59,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
     final pwd = _password.text;
     final name = _fullName.text.trim();
     final team = _teamName.text.trim();
+    final phone = _phone.text.trim();
 
     try {
       final registrationLocation = await inferRegistrationLocation();
@@ -65,6 +70,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
         data: {
           'full_name': name,
           'team_name': team,
+          'phone': phone,
           ...registrationLocation.toAuthMetadata(),
         },
       );
@@ -100,6 +106,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
             email: email,
             teamName: team,
             fullName: name,
+            phone: phone,
             registrationLocation: registrationLocation,
           );
           if (!mounted) return;
@@ -119,7 +126,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
         throw Exception('No session after signup');
       }
 
-      await Supabase.instance.client.rpc(
+      final teamId = await Supabase.instance.client.rpc(
         'bootstrap_owner_team',
         params: {
           'p_team_name': team,
@@ -127,6 +134,9 @@ class _SignupPageState extends ConsumerState<SignupPage> {
           ...registrationLocation.toRpcParams(),
         },
       );
+      if (teamId is String && teamId.isNotEmpty) {
+        await applyTeamProfilePhone(teamId: teamId, phone: phone);
+      }
 
       await persistLocalAuthMarker(
         ref.read(sharedPreferencesProvider),
@@ -206,6 +216,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
         context,
         title: 'Create pharmacy',
         automaticallyImplyLeading: false,
+        actions: [preLoginContactUsAction(context)],
       ),
       body: SafeArea(
         child: Center(
@@ -271,6 +282,19 @@ class _SignupPageState extends ConsumerState<SignupPage> {
                             }
                             return null;
                           },
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _phone,
+                          keyboardType: TextInputType.phone,
+                          autocorrect: false,
+                          decoration: const InputDecoration(
+                            labelText: 'Phone number',
+                            helperText:
+                                'Include country code when possible (7–15 digits)',
+                            hintText: '+251 9XX XXX XXX',
+                          ),
+                          validator: phoneValidationError,
                         ),
                         const SizedBox(height: 12),
                         TextFormField(

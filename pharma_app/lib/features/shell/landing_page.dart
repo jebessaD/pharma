@@ -10,7 +10,11 @@ class LandingPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: pharmacyHubAppBar(context, title: 'Pharma Shelf'),
+      appBar: pharmacyHubAppBar(
+        context,
+        title: 'Pharma Shelf',
+        actions: [preLoginContactUsAction(context)],
+      ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -31,9 +35,9 @@ class LandingPage extends StatelessWidget {
                 Text(
                   'Pharma Shelf',
                   textAlign: TextAlign.center,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(

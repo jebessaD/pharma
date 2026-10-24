@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/medicine/medicine_display.dart';
 import '../../core/layout/layout_density.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
@@ -122,7 +123,7 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
           .from('stock_movements')
           .select(
             'created_at, movement_type, qty_change_base_unit, reason, reference_type, '
-            'medicine_batches(batch_no, medicines(name, category_key))',
+            'medicine_batches(batch_no, medicines(name, generic_name, category_key))',
           )
           .eq('team_id', teamId)
           .eq('branch_id', branchId)
@@ -156,9 +157,12 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
     return list.where((r) {
       final mb = r['medicine_batches'] as Map<String, dynamic>?;
       final med = mb?['medicines'] as Map<String, dynamic>?;
-      final name = (med?['name'] as String? ?? '').toLowerCase();
+      final medMap = med ?? const <String, dynamic>{};
+      final haystack =
+          '${medicinePrimaryLabel(medMap)} ${medicineBrandName(medMap)} ${medicineGenericName(medMap)}'
+              .toLowerCase();
       final batch = (mb?['batch_no'] as String? ?? '').toLowerCase();
-      return name.contains(s) || batch.contains(s);
+      return haystack.contains(s) || batch.contains(s);
     }).toList();
   }
 
@@ -363,7 +367,8 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
                       final t = Theme.of(context);
                       final mb = r['medicine_batches'] as Map<String, dynamic>?;
                       final med = mb?['medicines'] as Map<String, dynamic>?;
-                      final name = med?['name'] as String? ?? '';
+                      final medMap = med ?? const <String, dynamic>{};
+                      final primary = medicinePrimaryLabel(medMap);
                       final batch = mb?['batch_no'] as String? ?? '';
                       final ts = formatDdMmYyyyHm(r['created_at']);
                       final qty = '${r['qty_change_base_unit']}';
@@ -394,7 +399,7 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
                               vertical: compact ? 0 : 2,
                             ),
                             title: Text(
-                              name,
+                              primary,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(

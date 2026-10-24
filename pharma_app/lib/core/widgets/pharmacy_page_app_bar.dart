@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../layout/layout_density.dart';
 
@@ -104,6 +105,16 @@ PreferredSizeWidget pharmacyBackAppBar(
     bottom: bottom,
     automaticallyImplyLeading: automaticallyImplyLeading,
     leading: leading,
+  );
+}
+
+/// Top-right support link on pre-login screens (landing, intro, auth).
+Widget preLoginContactUsAction(BuildContext context) {
+  return TextButton.icon(
+    onPressed: () => context.push('/contact'),
+    icon: const Icon(Icons.support_agent_outlined, size: 18),
+    label: const Text('Contact us'),
+    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
   );
 }
 

@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/medicine/medicine_display.dart';
 import '../../core/utils/date_formatters.dart';
 import '../../core/utils/etb_amount_display.dart';
 
@@ -45,12 +46,18 @@ String formatSaleReceiptText({
     final it = Map<String, dynamic>.from(raw as Map);
     final mb = it['medicine_batches'] as Map?;
     final med = mb?['medicines'] as Map?;
-    final name = med?['name'] as String? ?? 'Item';
+    final medMap = med == null
+        ? null
+        : Map<String, dynamic>.from(med);
+    final label = medMap == null ? 'Item' : medicinePrimaryLabel(medMap);
+    final brand = medMap == null ? null : medicineSecondaryLabel(medMap);
     final batch = mb?['batch_no'] as String? ?? '';
     final qty = it['qty'];
     final up = it['unit_price'];
     final lt = it['line_total'];
-    buf.writeln('$name (batch $batch)');
+    buf.writeln(
+      brand == null ? '$label (batch $batch)' : '$label · $brand (batch $batch)',
+    );
     buf.writeln('  $qty × ${_receiptMoney(up)} ETB = ${_receiptMoney(lt)} ETB');
   }
   buf.writeln('---');
@@ -83,7 +90,7 @@ Future<String?> loadSaleReceiptPlainText(
       .from('sales')
       .select(
         'id, created_at, subtotal, discount_total, grand_total, branch_id, sold_by, '
-        'sale_items(qty, unit_price, line_total, medicine_batches(batch_no, medicines(name))), '
+        'sale_items(qty, unit_price, line_total, medicine_batches(batch_no, medicines(name, generic_name))), '
         'payments(method, amount, reference_no)',
       )
       .eq('id', saleId)

@@ -59,7 +59,9 @@ List<MedicineCatalogEntry> searchMedicineCatalog(
       final ar = _catalogRank(a, q);
       final br = _catalogRank(b, q);
       if (ar != br) return ar.compareTo(br);
-      return a.name.compareTo(b.name);
+      final ga = a.genericName ?? a.name;
+      final gb = b.genericName ?? b.name;
+      return ga.compareTo(gb);
     });
   return matched.take(limit).toList(growable: false);
 }
@@ -75,10 +77,10 @@ int _catalogRank(MedicineCatalogEntry entry, String q) {
   ].whereType<String>().join(' ').toLowerCase();
 
   if (name == q || generic == q) return 0;
-  if (name.startsWith(q)) return 1;
-  if (generic.startsWith(q)) return 2;
-  if (name.contains(q)) return 3;
-  if (generic.contains(q)) return 4;
+  if (generic.startsWith(q)) return 1;
+  if (name.startsWith(q)) return 2;
+  if (generic.contains(q)) return 3;
+  if (name.contains(q)) return 4;
   if (details.startsWith(q)) return 5;
   if (details.contains(q)) return 6;
   return 99;

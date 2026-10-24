@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../auth/auth_persistence.dart';
@@ -13,6 +14,7 @@ import '../roles/stock_permissions.dart';
 import '../providers.dart';
 import '../shared_preferences_provider.dart';
 import '../../features/audit/activity_log_page.dart';
+import '../../features/auth/apply_team_phone.dart';
 import '../../features/auth/login_page.dart';
 import '../../features/auth/reset_password_page.dart';
 import '../../features/auth/signup_page.dart';
@@ -21,6 +23,12 @@ import '../../features/home/pharmacy_home_page.dart';
 import '../../features/inventory/stock_hub_page.dart';
 import '../../features/inventory/stock_in_page.dart';
 import '../../features/inventory/stock_movements_page.dart';
+import '../../features/inventory_import/import_capture_page.dart';
+import '../../features/inventory_import/import_history_page.dart';
+import '../../features/inventory_import/import_models.dart';
+import '../../features/inventory_import/import_review_page.dart';
+import '../../features/inventory_import/import_review_session.dart';
+import '../../features/inventory_import/spreadsheet/excel_import_page.dart';
 import '../../features/medicines/create_medicine_page.dart';
 import '../../features/medicines/edit_medicine_page.dart';
 import '../../features/medicines/medicine_detail_page.dart';
@@ -127,7 +135,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         };
         if (!canAddStockInForRole(role) &&
             (path == '/pharmacy/stock-in' ||
-                path.startsWith('/pharmacy/stock-in/'))) {
+                path.startsWith('/pharmacy/stock-in/') ||
+                path == '/pharmacy/import-stock' ||
+                path == '/pharmacy/import-excel' ||
+                path == '/pharmacy/import-history' ||
+                path == '/pharmacy/import-review')) {
           return false;
         }
         return allowed.any((prefix) => allowedPathMatches(path, prefix));
@@ -252,6 +264,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                   (isPending ? pending.fullName : null) ??
                   (meta['full_name'] as String?) ??
                   '';
+              final phone =
+                  (isPending ? pending.phone : null) ??
+                  (meta['phone'] as String?) ??
+                  '';
               final pendingLocation = isPending
                   ? pending.registrationLocation
                   : RegistrationLocation.empty;
@@ -264,7 +280,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
 
               if (teamName.trim().length >= 2 && fullName.trim().isNotEmpty) {
                 try {
-                  await Supabase.instance.client.rpc(
+                  final teamId = await Supabase.instance.client.rpc(
                     'bootstrap_owner_team',
                     params: {
                       'p_team_name': teamName.trim(),
@@ -272,6 +288,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                       ...registrationLocation.toRpcParams(),
                     },
                   );
+                  if (teamId is String && teamId.isNotEmpty) {
+                    await applyTeamProfilePhone(teamId: teamId, phone: phone);
+                  }
                   await clearPendingOwnerSignup(prefs);
                 } catch (_) {
                   // bootstrap failed — login page can retry
@@ -314,6 +333,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const FirstInstallIntroPage(),
       ),
       GoRoute(path: '/', builder: (context, state) => const LandingPage()),
+      GoRoute(
+        path: '/contact',
+        builder: (context, state) => const ContactUsPage(),
+      ),
       GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
       GoRoute(
         path: '/callback',
@@ -483,13 +506,65 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: 'stock-in',
                 builder: (context, state) {
-                  final bulk = state.uri.queryParameters['tab'] == 'bulk';
-                  return StockInPage(openBulkTab: bulk);
+                  final tab = state.uri.queryParameters['tab'];
+                  return StockInPage(
+                    openBulkTab: tab == 'bulk',
+                    openImportTab: tab == 'import',
+                  );
                 },
               ),
               GoRoute(
                 path: 'bulk-stock-in',
                 redirect: (context, state) => '/pharmacy/stock-in?tab=bulk',
+              ),
+              // Sibling routes (not nested) so back never lands on a hidden chooser.
+              GoRoute(
+                path: 'import-stock',
+                builder: (context, state) {
+                  final mode = state.uri.queryParameters['mode'] == 'stock_in'
+                      ? ImportMode.directStockIn
+                      : ImportMode.purchaseInvoice;
+                  final photo = state.uri.queryParameters['photo'];
+                  final ImageSource? initialPhoto = switch (photo) {
+                    'camera' => ImageSource.camera,
+                    'gallery' => ImageSource.gallery,
+                    _ => null,
+                  };
+                  return ImportCapturePage(
+                    mode: mode,
+                    initialPhotoSource: initialPhoto,
+                  );
+                },
+              ),
+              GoRoute(
+                path: 'import-excel',
+                builder: (context, state) => const ExcelImportPage(),
+              ),
+              GoRoute(
+                path: 'import-history',
+                builder: (context, state) => const ImportHistoryPage(),
+              ),
+              GoRoute(
+                path: 'import-review',
+                builder: (context, state) {
+                  final session = takeImportReviewSession();
+                  if (session == null) {
+                    return ImportCapturePage(
+                      mode: state.uri.queryParameters['mode'] == 'stock_in'
+                          ? ImportMode.directStockIn
+                          : ImportMode.purchaseInvoice,
+                      missingSessionMessage:
+                          'Import session expired. Choose a file or photo again.',
+                    );
+                  }
+                  return ImportReviewPage(
+                    mode: session.mode,
+                    extraction: session.extraction,
+                    teamId: session.teamId,
+                    branchId: session.branchId,
+                    spreadsheetMeta: session.spreadsheetMeta,
+                  );
+                },
               ),
               GoRoute(
                 path: 'stock-movements',

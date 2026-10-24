@@ -49,7 +49,8 @@ class _MedicineCatalogAutocompleteFieldState
       textEditingController: widget.controller,
       focusNode: _focusNode,
       displayStringForOption: (entry) =>
-          widget.displayTextForOption?.call(entry) ?? entry.name,
+          widget.displayTextForOption?.call(entry) ??
+          (entry.genericName ?? entry.name),
       optionsBuilder: (value) =>
           searchMedicineCatalog(widget.catalog, value.text),
       onSelected: widget.onSelected,
@@ -87,8 +88,14 @@ class _MedicineCatalogAutocompleteFieldState
                 ),
                 itemBuilder: (context, index) {
                   final entry = items[index];
+                  final primary = entry.genericName ?? entry.name;
+                  final brand = entry.genericName != null &&
+                          entry.genericName!.isNotEmpty &&
+                          entry.name.isNotEmpty
+                      ? entry.name
+                      : null;
                   final details = [
-                    entry.genericName,
+                    if (brand != null) brand,
                     entry.strength,
                     entry.dosageForm,
                     entry.presentation,
@@ -96,7 +103,7 @@ class _MedicineCatalogAutocompleteFieldState
                   ].where((value) => value != null && value.isNotEmpty);
                   return ListTile(
                     dense: true,
-                    title: Text(entry.name),
+                    title: Text(primary),
                     subtitle: details.isEmpty
                         ? null
                         : Text(

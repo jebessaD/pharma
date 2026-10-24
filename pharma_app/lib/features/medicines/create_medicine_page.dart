@@ -8,6 +8,7 @@ import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
 import '../../core/medicine_catalog/medicine_catalog.dart';
 import '../../core/medicine_category_catalog.dart';
+import '../../core/pricing/recommended_sell_price.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
@@ -16,6 +17,7 @@ import '../../core/widgets/app_text_form_field.dart';
 import '../../core/widgets/form_error_banner.dart';
 import '../../core/widgets/medicine_catalog_form_fields.dart';
 import '../../core/widgets/pharmacy_page_app_bar.dart';
+import '../../core/widgets/apply_profit_roundup_checkbox.dart';
 import '../../core/widgets/slash_dd_mm_yyyy_input.dart';
 import 'stock_in_helpers.dart';
 import 'scan/medicine_scan_controller.dart';
@@ -41,7 +43,8 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
   final _dosageForm = TextEditingController();
   String _categoryKey = medicineCategoryCatalog.first.key;
   bool _loading = false;
-  bool _addStockNow = true;
+  bool _addStockNow = false;
+  bool _applyProfitRoundup = false;
   String? _error;
   final _stockBatchNo = TextEditingController();
   final _stockExpiry = TextEditingController();
@@ -107,16 +110,14 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
     if (_addStockNow) {
       final qty = num.tryParse(_stockQty.text.trim());
       if (qty == null || qty <= 0) {
-        setState(() => _error = 'Enter stock quantity or turn off Add stock now.');
+        setState(
+          () => _error = 'Enter stock quantity or turn off Add stock now.',
+        );
         return;
       }
       final expErr = slashDdMmYyyyExpiryError(
         _stockExpiry.text,
-        DateTime(
-          DateTime.now().year,
-          DateTime.now().month,
-          DateTime.now().day,
-        ),
+        DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
       );
       if (expErr != null) {
         setState(() => _error = expErr);
@@ -133,7 +134,9 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
     final name = _name.text.trim();
     final codeRaw = _code.text.trim();
     final buyPrice = num.tryParse(_stockBuy.text.trim()) ?? 0;
-    final sellPrice = num.tryParse(_stockSell.text.trim()) ?? 0;
+    final sellPrice =
+        num.tryParse(_stockSell.text.trim()) ??
+        (buyPrice > 0 ? recommendedSellPrice(buyPrice) : 0);
     setState(() {
       _loading = true;
       _error = null;
@@ -149,7 +152,9 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
                 ? null
                 : _generic.text.trim(),
             'manual_code': codeRaw.isEmpty ? null : codeRaw,
-            'barcode': _barcode.text.trim().isEmpty ? null : _barcode.text.trim(),
+            'barcode': _barcode.text.trim().isEmpty
+                ? null
+                : _barcode.text.trim(),
             'category_key': _categoryKey,
             'subcategory': optionalMedicineText(_subcategory),
             'country': optionalMedicineText(_country),
@@ -209,11 +214,12 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
           children: [
             MedicineCatalogAutocompleteField(
-              controller: _name,
+              controller: _generic,
               catalog: catalog,
-              label: 'Name',
+              label: 'Generic name',
+              hintText: 'Search by generic, brand, or strength',
+              displayTextForOption: (entry) => entry.genericName ?? entry.name,
               onSelected: _applyCatalogEntry,
-              validator: (v) => FormValidators.requiredText(v, label: 'Name'),
             ),
             if (catalogAsync.isLoading) ...[
               const SizedBox(height: 6),
@@ -221,12 +227,13 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
             ],
             const SizedBox(height: 12),
             MedicineCatalogAutocompleteField(
-              controller: _generic,
+              controller: _name,
               catalog: catalog,
-              label: 'Generic name',
-              hintText: 'Search by generic or medicine name',
-              displayTextForOption: (entry) => entry.genericName ?? entry.name,
+              label: 'Brand / trade name',
+              hintText: 'e.g. Aldaz, Panadol',
               onSelected: _applyCatalogEntry,
+              validator: (v) =>
+                  FormValidators.requiredText(v, label: 'Brand / trade name'),
             ),
             const SizedBox(height: 12),
             AppTextFormField(
@@ -345,6 +352,7 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
                           RegExp(r'^\d*\.?\d{0,2}$'),
                         ),
                       ],
+                      onChanged: (_) => setState(() {}),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -364,6 +372,20 @@ class _CreateMedicinePageState extends ConsumerState<CreateMedicinePage> {
                   ),
                 ],
               ),
+              if (_addStockNow) ...[
+                ApplyProfitRoundupCheckbox(
+                  value: _applyProfitRoundup,
+                  onChanged: (value) {
+                    setState(() {
+                      _applyProfitRoundup = value;
+                      if (!value) return;
+                      applyRecommendedSellPricesWhereEmpty([
+                        (purchase: _stockBuy, sell: _stockSell),
+                      ]);
+                    });
+                  },
+                ),
+              ],
               const SizedBox(height: 12),
             ],
             MedicineOptionalDetailsSection(

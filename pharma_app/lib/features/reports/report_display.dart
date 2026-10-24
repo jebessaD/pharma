@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/medicine/medicine_display.dart';
 import '../../core/utils/date_formatters.dart';
 import 'report_ui.dart';
 
@@ -661,7 +662,8 @@ class _SalesLineCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = theme;
     final cs = colorScheme;
-    final title = formatReportCell('medicine_name', row['medicine_name']);
+    final combined = formatReportCell('medicine_name', row['medicine_name']);
+    final (title, brand) = splitMedicineDisplayLabel(combined);
     final soldAmount = formatReportCell(
       'net_line_total',
       reportNetLineSold(row),
@@ -694,15 +696,32 @@ class _SalesLineCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Text(
-                    title.isEmpty ? '—' : title,
-                    style: t.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.1,
-                      height: 1.2,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title.isEmpty ? '—' : title,
+                        style: t.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.1,
+                          height: 1.2,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (brand != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          brand,
+                          style: t.textTheme.labelSmall?.copyWith(
+                            color: ReportUi.mutedText(cs),
+                            height: 1.15,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 if (soldAmount.isNotEmpty) ...[

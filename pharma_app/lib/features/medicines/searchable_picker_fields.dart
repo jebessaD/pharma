@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/medicine/medicine_display.dart';
 import '../../core/utils/date_formatters.dart';
 import 'medicine_search_bar.dart';
 
@@ -10,29 +11,18 @@ int _medicineRank(Map<String, dynamic> row, String q) {
   final code = (row['manual_code'] as String? ?? '').toLowerCase();
   final barcode = (row['barcode'] as String? ?? '').toLowerCase();
   final generic = (row['generic_name'] as String? ?? '').toLowerCase();
-  final details = _medicineDetailParts(row).join(' ').toLowerCase();
+  final details = medicineDetailParts(row).join(' ').toLowerCase();
 
-  if (name == q || code == q || barcode == q) return 0;
-  if (name.startsWith(q)) return 1;
+  if (name == q || code == q || barcode == q || generic == q) return 0;
+  if (generic.startsWith(q)) return 1;
   if (code.startsWith(q) || barcode.startsWith(q)) return 2;
-  if (generic.startsWith(q)) return 3;
-  if (name.contains(q)) return 4;
-  if (code.contains(q) || barcode.contains(q)) return 5;
-  if (generic.contains(q)) return 6;
+  if (name.startsWith(q)) return 3;
+  if (generic.contains(q)) return 4;
+  if (name.contains(q)) return 5;
+  if (code.contains(q) || barcode.contains(q)) return 6;
   if (details.startsWith(q)) return 7;
   if (details.contains(q)) return 8;
   return 99;
-}
-
-String _medicineText(Map<String, dynamic> row, String key) {
-  return row[key]?.toString().trim() ?? '';
-}
-
-List<String> _medicineDetailParts(Map<String, dynamic> row) {
-  return [
-    _medicineText(row, 'country'),
-    _medicineText(row, 'manual_code'),
-  ].where((value) => value.isNotEmpty).toList(growable: false);
 }
 
 int _batchRank(Map<String, dynamic> row, String q) {
@@ -97,14 +87,7 @@ class _MedicineAutocompleteFieldState extends State<MedicineAutocompleteField> {
       }
     }
     if (row == null) return '';
-    final code = row['manual_code'] as String? ?? '';
-    final barcode = row['barcode'] as String? ?? '';
-    final name = row['name'] as String? ?? '';
-    final parts = <String>[];
-    if (code.isNotEmpty) parts.add(code);
-    if (barcode.isNotEmpty) parts.add(barcode);
-    if (parts.isEmpty) return name;
-    return '$name (${parts.join(' / ')})';
+    return medicineAutocompleteLabel(row);
   }
 
   @override
@@ -116,31 +99,23 @@ class _MedicineAutocompleteFieldState extends State<MedicineAutocompleteField> {
   @override
   Widget build(BuildContext context) {
     return Autocomplete<Map<String, dynamic>>(
-      displayStringForOption: (row) {
-        final code = row['manual_code'] as String? ?? '';
-        final barcode = row['barcode'] as String? ?? '';
-        final name = row['name'] as String? ?? '';
-        final parts = <String>[];
-        if (code.isNotEmpty) parts.add(code);
-        if (barcode.isNotEmpty) parts.add(barcode);
-        if (parts.isEmpty) return name;
-        return '$name (${parts.join(' / ')})';
-      },
+      displayStringForOption: medicineAutocompleteLabel,
       optionsBuilder: (value) {
         final q = value.text.trim().toLowerCase();
         if (q.isEmpty) return widget.rows.take(15);
         final matched =
             widget.rows.where((row) {
               final s =
-                  '${row['name'] ?? ''} ${row['manual_code'] ?? ''} ${row['barcode'] ?? ''} ${row['generic_name'] ?? ''} ${_medicineDetailParts(row).join(' ')}'
+                  '${row['name'] ?? ''} ${row['manual_code'] ?? ''} ${row['barcode'] ?? ''} ${row['generic_name'] ?? ''} ${medicineDetailParts(row).join(' ')}'
                       .toLowerCase();
               return s.contains(q);
             }).toList()..sort((a, b) {
               final ar = _medicineRank(a, q);
               final br = _medicineRank(b, q);
               if (ar != br) return ar.compareTo(br);
-              return (a['name'] as String? ?? '').compareTo(
-                b['name'] as String? ?? '',
+              return (a['generic_name'] as String? ?? medicinePrimaryLabel(a))
+                  .compareTo(
+                b['generic_name'] as String? ?? medicinePrimaryLabel(b),
               );
             });
         return matched.take(20);
@@ -158,7 +133,7 @@ class _MedicineAutocompleteFieldState extends State<MedicineAutocompleteField> {
           focusNode: focusNode,
           decoration: InputDecoration(
             labelText: widget.label,
-            hintText: 'Search by name, code, generic name',
+            hintText: 'Search by generic, brand, or code',
           ),
           onChanged: (_) {
             // Keep internal display state in sync with user input so rebuilds

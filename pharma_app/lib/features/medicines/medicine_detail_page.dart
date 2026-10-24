@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/medicine/medicine_display.dart';
 import '../../core/medicine_category_catalog.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
@@ -169,8 +170,8 @@ class _MedicineDetailPageState extends ConsumerState<MedicineDetailPage> {
     final m = _medicine!;
     final t = Theme.of(context);
     final cs = t.colorScheme;
-    final name = m['name'] as String? ?? 'Medicine';
-    final generic = m['generic_name'] as String?;
+    final primary = medicinePrimaryLabel(m);
+    final brand = medicineSecondaryLabel(m);
     final code = m['manual_code'] as String?;
     final category = medicineCategoryLabel(m['category_key'] as String?);
 
@@ -188,15 +189,15 @@ class _MedicineDetailPageState extends ConsumerState<MedicineDetailPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        name,
+                        primary,
                         style: t.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      if (generic != null && generic.isNotEmpty) ...[
+                      if (brand != null) ...[
                         const SizedBox(height: 4),
                         Text(
-                          generic,
+                          brand,
                           style: t.textTheme.bodyMedium?.copyWith(
                             color: cs.onSurfaceVariant,
                           ),
@@ -291,9 +292,9 @@ class _MedicineDetailPageState extends ConsumerState<MedicineDetailPage> {
         ),
       );
     }
-    final name = _medicine!['name'] as String? ?? 'Medicine';
+    final title = medicinePrimaryLabel(_medicine!);
     return Scaffold(
-      appBar: pharmacyPageAppBar(context, title: name),
+      appBar: pharmacyPageAppBar(context, title: title),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/medicine/medicine_display.dart';
 import '../../core/layout/layout_density.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
@@ -143,9 +144,12 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
       rows = rows.where((r) {
         final mb = r['medicine_batches'] as Map<String, dynamic>?;
         final med = mb?['medicines'] as Map<String, dynamic>?;
-        final name = (med?['name'] as String? ?? '').toLowerCase();
+        final medMap = med ?? const <String, dynamic>{};
+        final haystack =
+            '${medicinePrimaryLabel(medMap)} ${medicineBrandName(medMap)} ${medicineGenericName(medMap)}'
+                .toLowerCase();
         final batch = (mb?['batch_no'] as String? ?? '').toLowerCase();
-        return name.contains(q) || batch.contains(q);
+        return haystack.contains(q) || batch.contains(q);
       }).toList();
     }
     if (_categoryFilterKeys.isNotEmpty) {
@@ -191,7 +195,7 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
       final data = await Supabase.instance.client
           .from('stock_balances')
           .select(
-            'qty_base_unit, medicine_batches(id, batch_no, expiry_date, medicines(name, category_key))',
+            'qty_base_unit, medicine_batches(id, batch_no, expiry_date, medicines(id, name, generic_name, category_key))',
           )
           .eq('team_id', teamId)
           .eq('branch_id', branchId);
@@ -296,9 +300,12 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                         final mb =
                             r['medicine_batches'] as Map<String, dynamic>?;
                         final med = mb?['medicines'] as Map<String, dynamic>?;
-                        final name = med?['name'] as String? ?? '';
+                        final medMap = med ?? const <String, dynamic>{};
+                        final primary = medicinePrimaryLabel(medMap);
+                        final brand = medicineSecondaryLabel(medMap);
                         final batch = mb?['batch_no'] as String? ?? '';
                         final exp = mb?['expiry_date'] as String? ?? '';
+                        final medicineId = med?['id'] as String?;
                         return PharmacyHubListRow(
                           icon: _stockExpiryIsNear(exp)
                               ? Icons.schedule_rounded
@@ -307,20 +314,38 @@ class _StockBalancePanelState extends ConsumerState<_StockBalancePanel> {
                               ? Theme.of(context).colorScheme.tertiary
                                   .withValues(alpha: 0.5)
                               : null,
-                          title: name,
-                          subtitle:
-                              'Batch ${batch.isEmpty ? "—" : batch} · exp ${formatDdMmYyyy(exp)}',
-                          trailing: Text(
-                            '$qty',
-                            style: context.layoutDensity
-                                .listTitleStyle(Theme.of(context).textTheme)
-                                ?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              color: Theme.of(context).colorScheme.primary,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
-                            ),
+                          title: primary,
+                          subtitle: [
+                            if (brand != null) brand,
+                            'Batch ${batch.isEmpty ? "—" : batch} · exp ${formatDdMmYyyy(exp)}',
+                          ].join(' · '),
+                          onTap: medicineId != null
+                              ? () =>
+                                    context.push('/pharmacy/medicines/$medicineId')
+                              : null,
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '$qty',
+                                style: context.layoutDensity
+                                    .listTitleStyle(Theme.of(context).textTheme)
+                                    ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                size: context.layoutDensity.listIconSize,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                            ],
                           ),
                         );
                       },
@@ -364,9 +389,12 @@ class _LowStockPanelState extends ConsumerState<_LowStockPanel> {
     return _rows.where((r) {
       final mb = r['medicine_batches'] as Map<String, dynamic>?;
       final med = mb?['medicines'] as Map<String, dynamic>?;
-      final name = (med?['name'] as String? ?? '').toLowerCase();
+      final medMap = med ?? const <String, dynamic>{};
+      final haystack =
+          '${medicinePrimaryLabel(medMap)} ${medicineBrandName(medMap)} ${medicineGenericName(medMap)}'
+              .toLowerCase();
       final batch = (mb?['batch_no'] as String? ?? '').toLowerCase();
-      return name.contains(q) || batch.contains(q);
+      return haystack.contains(q) || batch.contains(q);
     }).toList();
   }
 
@@ -397,7 +425,7 @@ class _LowStockPanelState extends ConsumerState<_LowStockPanel> {
       final data = await Supabase.instance.client
           .from('stock_balances')
           .select(
-            'qty_base_unit, medicine_batches(batch_no, expiry_date, medicines(name, reorder_level))',
+            'qty_base_unit, medicine_batches(batch_no, expiry_date, medicines(id, name, generic_name, reorder_level))',
           )
           .eq('team_id', teamId)
           .eq('branch_id', branchId);
@@ -477,11 +505,14 @@ class _LowStockPanelState extends ConsumerState<_LowStockPanel> {
                         final r = _displayRows[i];
                         final mb = r['medicine_batches'] as Map<String, dynamic>?;
                         final med = mb?['medicines'] as Map<String, dynamic>?;
-                        final name = med?['name'] as String? ?? '';
+                        final medMap = med ?? const <String, dynamic>{};
+                        final primary = medicinePrimaryLabel(medMap);
+                        final brand = medicineSecondaryLabel(medMap);
                         final reorder = med?['reorder_level'];
                         final batch = mb?['batch_no'] as String? ?? '';
                         final exp = mb?['expiry_date'] as String? ?? '';
                         final qty = r['qty_base_unit'];
+                        final medicineId = med?['id'] as String?;
                         return PharmacyHubListRow(
                           icon: Icons.warning_amber_rounded,
                           iconColor: Theme.of(context).colorScheme.error
@@ -490,12 +521,15 @@ class _LowStockPanelState extends ConsumerState<_LowStockPanel> {
                               .colorScheme
                               .error
                               .withValues(alpha: 0.45),
-                          title: name,
-                          subtitle:
-                              'Batch ${batch.isEmpty ? "—" : batch} · exp ${formatDdMmYyyy(exp)} · reorder ≤ $reorder',
+                          title: primary,
+                          subtitle: [
+                            if (brand != null) brand,
+                            'Batch ${batch.isEmpty ? "—" : batch} · exp ${formatDdMmYyyy(exp)} · reorder ≤ $reorder',
+                          ].join(' · '),
                           subtitleMaxLines: 2,
-                          onTap: canAddStockIn
-                              ? () => context.push('/pharmacy/stock-in')
+                          onTap: medicineId != null
+                              ? () =>
+                                    context.push('/pharmacy/medicines/$medicineId')
                               : null,
                           trailing: Column(
                             crossAxisAlignment: CrossAxisAlignment.end,

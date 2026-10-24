@@ -1,0 +1,991 @@
+{
+  "team_id": "4112ac1c-0ae5-436d-9036-d6b168f93cc6",
+  "team_name": "Ilili",
+  "exported_at": "2026-07-06",
+  "purpose": "Pre name/generic swap rollback. Delete this file after Ilili data is verified.",
+  "summary": {
+    "total": 163,
+    "swap": 141,
+    "skip": 22
+  },
+  "medicines": [
+    {
+      "id": "d72f44f9-2d67-42f6-a2d3-34cad919509f",
+      "name": "A-Ferin plus syrup",
+      "generic_name": "A-Ferin Plus",
+      "swap_action": "swap"
+    },
+    {
+      "id": "46818799-f0e4-4748-9de2-9e531292804a",
+      "name": "albenda single dose",
+      "generic_name": "albendazole 100mg/5ml 20ml suspension",
+      "swap_action": "swap"
+    },
+    {
+      "id": "12250ccb-574c-43c9-9060-b31228aad133",
+      "name": "Albendazole julphar 400mg/20ml single dose",
+      "generic_name": "albeda",
+      "swap_action": "swap"
+    },
+    {
+      "id": "ad233843-b1de-4d27-89c7-c4dd4cd42722",
+      "name": "Albendazole oral suspension 200mg 10ml",
+      "generic_name": "genalben",
+      "swap_action": "swap"
+    },
+    {
+      "id": "ffe54d8e-f027-4c44-b42f-4fdfdc36af13",
+      "name": "albendazole tablet 400mg",
+      "generic_name": "aldaz",
+      "swap_action": "swap"
+    },
+    {
+      "id": "4b887a33-f0a8-4a30-a97e-8c0783570797",
+      "name": "Albendzole tablets 400mg",
+      "generic_name": "Wormix 400",
+      "swap_action": "swap"
+    },
+    {
+      "id": "5de4b7f0-7904-49b7-af12-095f1069a0e5",
+      "name": "alcohol 70% 130ml",
+      "generic_name": "alcohol",
+      "swap_action": "swap"
+    },
+    {
+      "id": "15582102-162f-423c-9947-5e3c078bbb76",
+      "name": "Amlodipine 10 mg 10*10 tab",
+      "generic_name": "AMVASC",
+      "swap_action": "swap"
+    },
+    {
+      "id": "4e304625-9880-4a02-894b-4dc65054b168",
+      "name": "Amlodipine 10 mg tablet",
+      "generic_name": "Amvasc east african",
+      "swap_action": "swap"
+    },
+    {
+      "id": "90939cf7-e8d1-41f6-abac-9bc99740d765",
+      "name": "Amlodipine 5g 5*10 tab",
+      "generic_name": "amlo Denk 5",
+      "swap_action": "swap"
+    },
+    {
+      "id": "6dd0c1a5-c723-4c41-888a-d32f525b3d34",
+      "name": "amoxacilin 125mg/5ml 100ml Susp.",
+      "generic_name": "Largopen",
+      "swap_action": "swap"
+    },
+    {
+      "id": "ff8346c3-9e70-46ca-b61b-d24fe51c0d08",
+      "name": "amoxacilin 250mg/5ml 100ml susp",
+      "generic_name": "Miloxy-S suspension",
+      "swap_action": "swap"
+    },
+    {
+      "id": "3dfa5849-79bc-4df0-b7cd-57f1a64849de",
+      "name": "Amoxacillin 250mg/5ml 100ml",
+      "generic_name": "Largopen",
+      "swap_action": "swap"
+    },
+    {
+      "id": "821d70d0-a8f2-4946-97d5-4dbe44121296",
+      "name": "Amoxicillin + clavulanic acid 312.5mg/5mg",
+      "generic_name": "Augmentin (Klamoks)",
+      "swap_action": "swap"
+    },
+    {
+      "id": "908f0a8d-7dbd-4d46-a6e1-c4919638c84e",
+      "name": "amoxicillin 125mg/5ml suspension",
+      "generic_name": "AMYN",
+      "swap_action": "swap"
+    },
+    {
+      "id": "a5babcec-6c04-4061-8368-e711a3673c90",
+      "name": "AMOXICILLIN 500mg capsules",
+      "generic_name": "AMyn 500",
+      "swap_action": "swap"
+    },
+    {
+      "id": "5e7f1dc9-4151-427e-b141-7f8c956d3510",
+      "name": "Amoxicillin and clavulanatee potassium tablet",
+      "generic_name": "novamentin 625",
+      "swap_action": "swap"
+    },
+    {
+      "id": "f212aa61-2dec-4fab-ac50-2081936460bf",
+      "name": "Ampicillin 500mg cap",
+      "generic_name": "Ampi-500",
+      "swap_action": "swap"
+    },
+    {
+      "id": "fe45aedf-9d1c-4f8e-947e-3479cd2ab52c",
+      "name": "AMTAS",
+      "generic_name": "AMLODIPINE 5mg Tablet",
+      "swap_action": "skip"
+    },
+    {
+      "id": "9f894bc1-9b61-4ca7-b200-c01dadc96a81",
+      "name": "Amyn 250mg/5ml 100ml susp",
+      "generic_name": "Amyn",
+      "swap_action": "swap"
+    },
+    {
+      "id": "96359162-3921-4521-9d26-f08be2827923",
+      "name": "Antacid 200ml gel",
+      "generic_name": "Antagit-S",
+      "swap_action": "swap"
+    },
+    {
+      "id": "b06d6580-bfcc-429d-8ffd-c552f8a84e33",
+      "name": "Atenolol tablet BP",
+      "generic_name": "B-Block 50",
+      "swap_action": "swap"
+    },
+    {
+      "id": "e81bd6c1-1dcb-4c49-aed3-ec7a0e806e56",
+      "name": "Azithromycin 200mg/5ml",
+      "generic_name": "Cazithro",
+      "swap_action": "swap"
+    },
+    {
+      "id": "9c9df9b1-bced-418a-b4ad-e6d1e631725f",
+      "name": "Azithromycin for oral suspension USP 200mg/5ml",
+      "generic_name": "Azito suspension",
+      "swap_action": "swap"
+    },
+    {
+      "id": "1a76d2ac-6a5c-4f0f-acdd-e5fa12488bd3",
+      "name": "Azithromycin orsl suspention 200mg/5ml",
+      "generic_name": "azicin",
+      "swap_action": "swap"
+    },
+    {
+      "id": "83b2a5ed-aa35-43dc-89f6-d766a50d5c75",
+      "name": "Azithromycin tablets USP 500mg",
+      "generic_name": "Azito",
+      "swap_action": "swap"
+    },
+    {
+      "id": "9b98802b-f5a0-4092-b313-7f001059e948",
+      "name": "B-Sitosterol",
+      "generic_name": "Mebo",
+      "swap_action": "swap"
+    },
+    {
+      "id": "1cbc3109-db96-4dd1-8ded-4be45e0433e9",
+      "name": "Back up",
+      "generic_name": "back up",
+      "swap_action": "skip"
+    },
+    {
+      "id": "db7d6158-63a4-4230-9a59-d33d418b051f",
+      "name": "BBL Lotion",
+      "generic_name": "benzyl benzoate application",
+      "swap_action": "swap"
+    },
+    {
+      "id": "c30923e0-c703-4574-9c8d-3498d7477a3e",
+      "name": "BENZOIC ACID + SALICYLIC ACID",
+      "generic_name": "whitefield's skin ointment 20g",
+      "swap_action": "swap"
+    },
+    {
+      "id": "ce478bcc-05dd-4ef7-a3f2-e4262a408726",
+      "name": "Beprosone 15 mg cream",
+      "generic_name": "Beprosone Cream 0.064% W/W",
+      "swap_action": "skip"
+    },
+    {
+      "id": "1e0d1c08-7265-4454-954c-801546ebef8e",
+      "name": "bethametazone ointment 0.1% 15gm",
+      "generic_name": "Betaleb",
+      "swap_action": "swap"
+    },
+    {
+      "id": "fcfdcf60-9e54-4b72-93d3-116d864d09f1",
+      "name": "Bisacidyl tablet 10mg",
+      "generic_name": "laxin",
+      "swap_action": "swap"
+    },
+    {
+      "id": "0f347983-067e-43c4-b5a2-86e990540f44",
+      "name": "blueseal vasiline",
+      "generic_name": "vassiline",
+      "swap_action": "swap"
+    },
+    {
+      "id": "799fc265-f0b5-4475-8979-2bdccf1f4b70",
+      "name": "Caplofen thermal 30g Gel",
+      "generic_name": null,
+      "swap_action": "skip"
+    },
+    {
+      "id": "c71867d3-00b3-4a44-9412-9c26c961dc3c",
+      "name": "Carbamazepine tablets 200mg",
+      "generic_name": "Calama",
+      "swap_action": "swap"
+    },
+    {
+      "id": "a8cd6b1a-2d08-46e8-9c08-accb3c595bba",
+      "name": "carbamazipine",
+      "generic_name": "carbamazipine 200mg",
+      "swap_action": "swap"
+    },
+    {
+      "id": "5ff530cf-362d-4133-ad13-afb9b913428f",
+      "name": "cefalexin",
+      "generic_name": "Aurocef 500",
+      "swap_action": "swap"
+    },
+    {
+      "id": "1540a1a9-5a5d-441e-bca7-4c97bc9f980b",
+      "name": "ceftriaxone 1g injection",
+      "generic_name": "ceftriaxone",
+      "swap_action": "swap"
+    },
+    {
+      "id": "683fd734-adc1-4135-99ea-562bd51cd45f",
+      "name": "ceftriaxone sodium 1gm injection IM/IV",
+      "generic_name": "ceftazone injection",
+      "swap_action": "swap"
+    },
+    {
+      "id": "a61504dd-1e34-4c49-a15e-b2988cbd541c",
+      "name": "cephalexin for oral suspension 125mg/5ml",
+      "generic_name": "Scolexin",
+      "swap_action": "swap"
+    },
+    {
+      "id": "9613cd86-da31-4606-ba0d-ada8ec3f5d0b",
+      "name": "cephalixin oral suspension USP 250/5ML",
+      "generic_name": "scolexin",
+      "swap_action": "swap"
+    },
+    {
+      "id": "2bee35ea-34b2-4638-8a5e-b733c3561ca6",
+      "name": "chewable compound Magnesium Trisilicate Tablets BP",
+      "generic_name": "Corasil",
+      "swap_action": "swap"
+    },
+    {
+      "id": "1ac7d944-7425-4ce3-adbc-80f8a736f3bd",
+      "name": "Chlorpheniramine 2mg/ 5ml 60ml syrup",
+      "generic_name": "chlorpheniramine 60ml",
+      "swap_action": "swap"
+    },
+    {
+      "id": "92831be7-1717-4876-bfca-3fec1568eedb",
+      "name": "chlorpheniramine maleate 4mg",
+      "generic_name": "chlorohistol",
+      "swap_action": "swap"
+    },
+    {
+      "id": "df7bb37e-5db6-4607-905a-2b23b152801a",
+      "name": "choice oral contraceptive",
+      "generic_name": "levonorgestrel and ethinylestradiol",
+      "swap_action": "swap"
+    },
+    {
+      "id": "ed942fe7-3650-44e4-b34d-3b33dd30a2e9",
+      "name": "ciprofloxacin (0.3%)&dexamethasone(0.1%) eye drops",
+      "generic_name": "CIPROCIR-D",
+      "swap_action": "swap"
+    },
+    {
+      "id": "ec7a603c-025d-4be4-8f53-a1de26cd81cd",
+      "name": "Ciprofloxacin 0.03% 5ml eye drop",
+      "generic_name": "ciprofloxacin eye drop",
+      "swap_action": "swap"
+    },
+    {
+      "id": "92f0c4bf-5cbf-4ad9-8be3-6cd93294671d",
+      "name": "ciprofloxacin 500mg tab10*10",
+      "generic_name": "CP-500",
+      "swap_action": "swap"
+    },
+    {
+      "id": "d6b277db-1ef9-4463-a16f-3db114fd3d16",
+      "name": "Clarithromycin USP tablet 500mg",
+      "generic_name": "Clarzim 500mg",
+      "swap_action": "swap"
+    },
+    {
+      "id": "3383520d-0ce1-4fe8-b750-121da420e9d4",
+      "name": "clotrimazole 1% 15g cream",
+      "generic_name": "clotrimazole cream BP",
+      "swap_action": "swap"
+    },
+    {
+      "id": "24bd589d-b61b-47fa-9c93-a4179c1e2590",
+      "name": "Cloxacillin 125mg/5ml 100ml Susp",
+      "generic_name": "Cloxin",
+      "swap_action": "swap"
+    },
+    {
+      "id": "6cb6baf3-856d-4dbb-9009-6920dbd1dd6c",
+      "name": "cloxacillin sodium capsules",
+      "generic_name": "Cloxavid-250",
+      "swap_action": "swap"
+    },
+    {
+      "id": "be63185e-50eb-45ca-91c6-51b166ee57fe",
+      "name": "co-Trimoxazole 480mg tablets BP",
+      "generic_name": "L-Trim",
+      "swap_action": "swap"
+    },
+    {
+      "id": "2d6dcdad-4ca0-43a9-a4d9-9267a5012b68",
+      "name": "COAMOXICLAV TABLETS 625mg 2*10",
+      "generic_name": "cledomox 625",
+      "swap_action": "swap"
+    },
+    {
+      "id": "12d48fd9-1057-401f-acfe-e7d57e9a06b6",
+      "name": "condom",
+      "generic_name": "sensation",
+      "swap_action": "swap"
+    },
+    {
+      "id": "530b0ddb-2650-4899-9c44-7d7dc8a93208",
+      "name": "cotrimoxazole Oral Suspension BP Paediatric 240mg/5ml",
+      "generic_name": "MLCONTRI SUSPENSION",
+      "swap_action": "swap"
+    },
+    {
+      "id": "f5496fe3-04ff-4c18-a652-4d06c0d5b37d",
+      "name": "cutton bud ear",
+      "generic_name": "cutton bud ear",
+      "swap_action": "skip"
+    },
+    {
+      "id": "fe31053f-e136-46f4-b5f7-821c35bc39d5",
+      "name": "DC Daiper small",
+      "generic_name": "Dc daiper",
+      "swap_action": "swap"
+    },
+    {
+      "id": "f1927df7-e21b-41fc-96f2-d0703e839e75",
+      "name": "desloratadine 5mg film coated tab",
+      "generic_name": "Aria-Des",
+      "swap_action": "swap"
+    },
+    {
+      "id": "bc2e560e-a389-46ea-8f95-4e68b632f4e8",
+      "name": "Dexamethasone Sodium phosphate ophthalmic solution",
+      "generic_name": "Dexacon",
+      "swap_action": "swap"
+    },
+    {
+      "id": "4c6bfa73-72cc-4ee8-83aa-274875001b50",
+      "name": "Dextromethorphan Hydrobromide syrup 15mg/5ml",
+      "generic_name": "Dexglosyrup",
+      "swap_action": "swap"
+    },
+    {
+      "id": "f2c41061-7c7e-4b66-a5eb-e521d99eb8db",
+      "name": "diclofenac",
+      "generic_name": "Diclo denk 50",
+      "swap_action": "swap"
+    },
+    {
+      "id": "b13fea6d-e195-4470-86f0-78f5eac0579b",
+      "name": "Diclofenac 30g Gel",
+      "generic_name": "Adiflam",
+      "swap_action": "swap"
+    },
+    {
+      "id": "ab09b042-c231-48df-b783-d901ffda325c",
+      "name": "diclofenac potassium USP 50 mg",
+      "generic_name": "REGUNAC",
+      "swap_action": "swap"
+    },
+    {
+      "id": "0ec69af9-a0d1-405c-8631-da451d7422a8",
+      "name": "diclofenac sodium injection 75mg/3ml IM",
+      "generic_name": "diclo injection",
+      "swap_action": "swap"
+    },
+    {
+      "id": "7d25395a-7edc-4e46-bbf6-0aca80fa9f45",
+      "name": "diclofenac sodium suppositories",
+      "generic_name": "DOFEC 100",
+      "swap_action": "swap"
+    },
+    {
+      "id": "15ab21a6-310f-4cc1-9666-38db32eb32b6",
+      "name": "diphenhydramine 12.5/5ml 100ml syrup",
+      "generic_name": "mentex syrup",
+      "swap_action": "swap"
+    },
+    {
+      "id": "ac85a0b1-4d70-4b48-a523-e083889499f7",
+      "name": "Dis.Syringe 3cc",
+      "generic_name": "Dis. Syringe 3cc",
+      "swap_action": "swap"
+    },
+    {
+      "id": "64ccb81b-6ec8-4514-85ac-e54faff36b0d",
+      "name": "Disp. Syringe 10cc",
+      "generic_name": "ds. syringe 10cc",
+      "swap_action": "swap"
+    },
+    {
+      "id": "93df6409-aadd-4ca4-9bfc-e4f2d292eb04",
+      "name": "Disposable Syringe 5cc",
+      "generic_name": "Disposable Syringe 5 cc",
+      "swap_action": "swap"
+    },
+    {
+      "id": "edff7a04-461a-4e6a-87e6-60c79e39372b",
+      "name": "Doxycycline",
+      "generic_name": "Remycin",
+      "swap_action": "swap"
+    },
+    {
+      "id": "cdfac631-09f6-4fff-a054-9d694b0bd0ce",
+      "name": "duaxamine 600mg",
+      "generic_name": "gab",
+      "swap_action": "swap"
+    },
+    {
+      "id": "96e0efcb-8faa-43e1-97ee-c32a62683df8",
+      "name": "Esomprazole tablets 20mg",
+      "generic_name": "Nexap",
+      "swap_action": "swap"
+    },
+    {
+      "id": "fdd685b7-8c58-470c-91bc-ed7aee01d41f",
+      "name": "Examination Glove",
+      "generic_name": "examination Glove",
+      "swap_action": "skip"
+    },
+    {
+      "id": "8e668acb-4517-48d9-a0e2-be8ee620eb4e",
+      "name": "Fluoxetine",
+      "generic_name": "Fxeti-SSP 20",
+      "swap_action": "swap"
+    },
+    {
+      "id": "e7f092eb-f8f3-4c00-9a43-4b1d0db12e04",
+      "name": "Flustop",
+      "generic_name": "flustop",
+      "swap_action": "skip"
+    },
+    {
+      "id": "4c0eba91-7746-49df-a782-4f87ce8a9d2c",
+      "name": "Folic acid 5 mg",
+      "generic_name": "folicum",
+      "swap_action": "swap"
+    },
+    {
+      "id": "20fd9aa0-ed33-4989-b1b1-72edfbfe88d3",
+      "name": "formentin Tablets BP 1000 mg",
+      "generic_name": "Formentin 1000",
+      "swap_action": "swap"
+    },
+    {
+      "id": "41a5e9fb-9bf6-4c80-bbb7-55387cdac320",
+      "name": "Fortine",
+      "generic_name": "Flurbiprofen",
+      "swap_action": "skip"
+    },
+    {
+      "id": "572e95d1-d0dd-43fa-8974-38948f8282ca",
+      "name": "Gentamycin 0.3% E/e 10 nlvdrop",
+      "generic_name": "Ivygentacin",
+      "swap_action": "swap"
+    },
+    {
+      "id": "5a013844-27b1-433b-8207-35f5623b440b",
+      "name": "Glibenclamide tablet BP",
+      "generic_name": "Glamide",
+      "swap_action": "swap"
+    },
+    {
+      "id": "6c9a70c5-ef46-4a99-a59b-e64e8fbd1dea",
+      "name": "Glimepride 2 mg Tablets",
+      "generic_name": "Gleap 2",
+      "swap_action": "swap"
+    },
+    {
+      "id": "4fd50b07-ff94-4097-84e2-8acf2d1f3dab",
+      "name": "Guaifenesin, Dextromethorphan hydrobromide meleate syrup",
+      "generic_name": "Cofgel",
+      "swap_action": "swap"
+    },
+    {
+      "id": "2fc587d8-92bf-45cc-8331-d4444a11a557",
+      "name": "Guaze babdage",
+      "generic_name": "guaze",
+      "swap_action": "swap"
+    },
+    {
+      "id": "3403e247-7e48-4f69-883e-279776b99fd2",
+      "name": "Guaze bandage",
+      "generic_name": "guaze bandage 7.5cm",
+      "swap_action": "swap"
+    },
+    {
+      "id": "55f2ae99-b233-42ed-ab15-c3f4db51a863",
+      "name": "haemup",
+      "generic_name": "haemup",
+      "swap_action": "skip"
+    },
+    {
+      "id": "427fcd4c-a037-4600-a225-2c0033629f76",
+      "name": "HCG TEST",
+      "generic_name": "HCG TEST",
+      "swap_action": "skip"
+    },
+    {
+      "id": "efb0d96d-e162-4c31-9043-dd12fa298a02",
+      "name": "heydrogin 3% 130 ml",
+      "generic_name": "Hydrogen peroxide",
+      "swap_action": "swap"
+    },
+    {
+      "id": "683b841b-0b25-4c30-bfbd-ee7b3e2ec2e0",
+      "name": "Hydrocortisone 1% 15g cream",
+      "generic_name": null,
+      "swap_action": "skip"
+    },
+    {
+      "id": "ce4371b3-8991-478f-80ef-cf5ba7c19a75",
+      "name": "Hyosine Tab 10mg 10*10",
+      "generic_name": "Hakalu HYOSINE TAB",
+      "swap_action": "swap"
+    },
+    {
+      "id": "62fe2114-1a2e-4f29-82e9-a7b3a3b282c0",
+      "name": "ibu plus",
+      "generic_name": "gasic-P",
+      "swap_action": "swap"
+    },
+    {
+      "id": "26250263-a59d-4d44-a65f-ece5ab317fe7",
+      "name": "Ibuprofen 400mg",
+      "generic_name": "Ibuprofen Denk",
+      "swap_action": "swap"
+    },
+    {
+      "id": "a5f3aa28-1b70-4992-8e8b-2278c985517e",
+      "name": "Ibuprofen 400mg",
+      "generic_name": "GOFEN 400",
+      "swap_action": "swap"
+    },
+    {
+      "id": "b695255f-9624-4462-9f8e-b82c15468f34",
+      "name": "Ibuprofen oral suspension BP 100mg/5ml",
+      "generic_name": "IBUMAC 100",
+      "swap_action": "swap"
+    },
+    {
+      "id": "10c669ca-e4b3-4bc7-9437-3102bc3a5a36",
+      "name": "Ibuprofen oral Suspension BP 100mg/5ml",
+      "generic_name": "IBUPIL",
+      "swap_action": "swap"
+    },
+    {
+      "id": "5131d1a8-ad8c-41cd-b261-65825bc3f1fa",
+      "name": "Ibuprofen tablets Bp 400mg",
+      "generic_name": "Milprofen",
+      "swap_action": "swap"
+    },
+    {
+      "id": "b755c4a8-7617-4c83-8483-86552a255496",
+      "name": "Indomethacin 100mg of 100 Supp",
+      "generic_name": "Indocor Suppositories",
+      "swap_action": "swap"
+    },
+    {
+      "id": "0dbb79b4-254a-43e7-921d-162872ebebcb",
+      "name": "indomethacin capsules bp 35mg",
+      "generic_name": "indol",
+      "swap_action": "swap"
+    },
+    {
+      "id": "2c677dbf-3b2d-431d-a092-5890a6d2200a",
+      "name": "INDOMICIN",
+      "generic_name": "INDOMETHACIN",
+      "swap_action": "skip"
+    },
+    {
+      "id": "e9e65934-a352-4888-a712-bed47a5428c6",
+      "name": "Isoconazole- 20mg Cream",
+      "generic_name": "Azonit-D",
+      "swap_action": "swap"
+    },
+    {
+      "id": "1fc0a85b-6519-4ae2-884a-e42ec0d85a8f",
+      "name": "ketoconazole 200mg tablet",
+      "generic_name": "KETOCONAZOLE",
+      "swap_action": "skip"
+    },
+    {
+      "id": "ca6de457-e414-4d2b-ae4a-9e6574d8e088",
+      "name": "Ketoconazole 20g cream",
+      "generic_name": "keto cream",
+      "swap_action": "swap"
+    },
+    {
+      "id": "c24bae39-4301-46b7-b59c-c975c8e756bf",
+      "name": "Ketoconzole % 100ml Shampoo",
+      "generic_name": "ketoconazole shampoo",
+      "swap_action": "swap"
+    },
+    {
+      "id": "bf27203c-6297-4484-b725-85fde8a728e4",
+      "name": "Klamoks 256mg/5ml 100ml Pediatric suspension",
+      "generic_name": "amoxillin +clavulanic acid",
+      "swap_action": "skip"
+    },
+    {
+      "id": "29bb79e1-2e70-4764-ade7-7a971a373018",
+      "name": "Klamoks BID 200/28mg",
+      "generic_name": "Amoxicillin clavulanic acid",
+      "swap_action": "skip"
+    },
+    {
+      "id": "2f497a31-df91-40cd-a131-4cb6c955e54f",
+      "name": "lemlem Orange",
+      "generic_name": "lemlem",
+      "swap_action": "swap"
+    },
+    {
+      "id": "479a3ac2-8d04-4d7f-a03c-8eb75977f270",
+      "name": "liquid iron and multivitamin syrup",
+      "generic_name": "Feramin syrup",
+      "swap_action": "swap"
+    },
+    {
+      "id": "52602f1c-6da2-4b2b-bcb8-f98b405b1611",
+      "name": "LOSARTAN potassium 50 mg tablet",
+      "generic_name": "LOSARTAN",
+      "swap_action": "swap"
+    },
+    {
+      "id": "9f2528bd-b741-4203-8c2a-09b41cb2ccc2",
+      "name": "mebendazole 500mg",
+      "generic_name": "Fubenzon",
+      "swap_action": "swap"
+    },
+    {
+      "id": "39332306-7bd1-411f-b690-0fbe5fd1e714",
+      "name": "MEBENDAZOLE 500mg",
+      "generic_name": "X-WORM 500mg",
+      "swap_action": "swap"
+    },
+    {
+      "id": "3d7fcb82-e73f-46d9-a59f-9a6d66faac0d",
+      "name": "medofed 136.25mg/5mg compound syrup",
+      "generic_name": "cuoghsyrup",
+      "swap_action": "swap"
+    },
+    {
+      "id": "a5a66e9a-d581-46b8-bd2a-e1ccea574fc0",
+      "name": "meloxicam 15 mg",
+      "generic_name": "Melocam 15",
+      "swap_action": "swap"
+    },
+    {
+      "id": "7e0f4c61-930b-4a80-b45e-7f75ed89619c",
+      "name": "meloxicum 15 mg tablets usp",
+      "generic_name": "melomcore 15",
+      "swap_action": "swap"
+    },
+    {
+      "id": "773ca793-04a8-4be9-823c-8d4038fbbcfe",
+      "name": "metformin 500mg",
+      "generic_name": "daophage",
+      "swap_action": "swap"
+    },
+    {
+      "id": "87ec28e5-cd96-498a-a46b-14f5b74bb926",
+      "name": "metronidazole 200mg/5ml 100ml susp",
+      "generic_name": "Flagellat forte",
+      "swap_action": "swap"
+    },
+    {
+      "id": "f31c115c-c577-4a13-8b45-12e17497bb18",
+      "name": "metronidazole 500mg",
+      "generic_name": "metazol",
+      "swap_action": "swap"
+    },
+    {
+      "id": "e494afcd-6923-40c0-bf35-835a693e0c8a",
+      "name": "metronidiazole suspension buvable BP",
+      "generic_name": "metrokant",
+      "swap_action": "swap"
+    },
+    {
+      "id": "9cd5d911-4888-4ebc-bb50-b9c6e74c1879",
+      "name": "moony daiper large",
+      "generic_name": "moo y daiper",
+      "swap_action": "swap"
+    },
+    {
+      "id": "a92f5646-46fb-45eb-b78b-5e9947ee5e3e",
+      "name": "multivitamin 100ml syrup",
+      "generic_name": "cirovit",
+      "swap_action": "swap"
+    },
+    {
+      "id": "901021c4-12fb-4265-81ec-9e223f5fafaa",
+      "name": "multivitamin and liquid iron syrup 200ml",
+      "generic_name": "feramin",
+      "swap_action": "swap"
+    },
+    {
+      "id": "00e24657-ab74-4498-ad0d-f1ee39303c10",
+      "name": "multivitamin tablet 10*10",
+      "generic_name": "multivitamin tab",
+      "swap_action": "skip"
+    },
+    {
+      "id": "ffce5636-1688-4cc3-a393-0eb8b4906273",
+      "name": "Nitrofurazone ointment 0.2% 50mg",
+      "generic_name": "nitrofurazone 0.2%",
+      "swap_action": "swap"
+    },
+    {
+      "id": "db996cda-9053-4470-ac77-9812f3eae69d",
+      "name": "Nitrofurazone skin ointment",
+      "generic_name": "nitrofurazone 0.1g",
+      "swap_action": "swap"
+    },
+    {
+      "id": "351e5ce6-9f0b-4421-bc66-80e81fe264f3",
+      "name": "Norfloxacin tablets BP 400mg",
+      "generic_name": "NORFLIPIN 400",
+      "swap_action": "swap"
+    },
+    {
+      "id": "aa48fbfb-79be-425d-90c5-7bda7dbf158c",
+      "name": "Nystatin 100, 000IU 30 ml kral suspention",
+      "generic_name": "Nystaleb",
+      "swap_action": "swap"
+    },
+    {
+      "id": "2ea16528-abcb-4d6c-8e89-54bf8bfc1bd6",
+      "name": "oberem",
+      "generic_name": "ondasetron",
+      "swap_action": "skip"
+    },
+    {
+      "id": "1f7c7882-0ea8-4ef9-a310-152a1b61c791",
+      "name": "omeorazole sodium injection 40 mg",
+      "generic_name": "omeorazole",
+      "swap_action": "swap"
+    },
+    {
+      "id": "38632c71-3738-447e-b9da-fe222bcf6f88",
+      "name": "Omeprazole capsules 20 mg",
+      "generic_name": "Lokit",
+      "swap_action": "swap"
+    },
+    {
+      "id": "b8896a9e-3a01-4a09-a626-492175ca67f2",
+      "name": "ondanserton",
+      "generic_name": "oberem",
+      "swap_action": "swap"
+    },
+    {
+      "id": "ed14f483-d14b-4d2c-b28f-a4d639bb3118",
+      "name": "paediatric paracetamol 120mg/5ml syrup",
+      "generic_name": "Parakant",
+      "swap_action": "swap"
+    },
+    {
+      "id": "53a29d38-5c9e-4327-be70-c839a40a0587",
+      "name": "pantoprazole 20 mg tab",
+      "generic_name": "pandev 20 mg",
+      "swap_action": "swap"
+    },
+    {
+      "id": "47e4e14a-97bc-4c4a-8736-5a8bc4b61fb9",
+      "name": "pantoprazole 40mg tablet",
+      "generic_name": "pandev 40 mg",
+      "swap_action": "swap"
+    },
+    {
+      "id": "9dbf3275-7e77-452e-b09a-81c77e66a2c6",
+      "name": "pantoprazole bp tablets 40mg",
+      "generic_name": "ultop pantoprazole",
+      "swap_action": "swap"
+    },
+    {
+      "id": "7b37da72-7826-4159-b853-db4673413434",
+      "name": "Pantoprazole Sodium Delayed-Release tablet",
+      "generic_name": "piplan 40mg",
+      "swap_action": "swap"
+    },
+    {
+      "id": "01013dbe-ea8f-44fb-8eaf-bc091c45b59c",
+      "name": "paracetamol 500mg",
+      "generic_name": "Panadol",
+      "swap_action": "swap"
+    },
+    {
+      "id": "f58aa8eb-2b60-4709-b8ad-c755b2f0f9dc",
+      "name": "paracetamol 500mg tab",
+      "generic_name": "epharm",
+      "swap_action": "swap"
+    },
+    {
+      "id": "80a58e1c-f0c5-4522-98d1-35091af4328f",
+      "name": "paracetamol suppository 125mg",
+      "generic_name": "Poro suppository",
+      "swap_action": "swap"
+    },
+    {
+      "id": "d874e2a5-5c85-407f-aa56-3495e8b007e3",
+      "name": "paracetamol tablet BP 500mg",
+      "generic_name": "perfac 500",
+      "swap_action": "swap"
+    },
+    {
+      "id": "b600b441-cd71-47eb-ba23-57645ed69690",
+      "name": "plaster",
+      "generic_name": "plaster",
+      "swap_action": "skip"
+    },
+    {
+      "id": "a5dac132-9c86-4f77-90dc-d1c07d0f8479",
+      "name": "post pill",
+      "generic_name": "mela one",
+      "swap_action": "swap"
+    },
+    {
+      "id": "6ee33ee5-2e63-48ec-b8ef-d2751b5efa92",
+      "name": "prednisolone Tablets BP 5mg",
+      "generic_name": "prednova 5",
+      "swap_action": "swap"
+    },
+    {
+      "id": "2d2c6382-f38d-46c0-942b-4e580fcf12ea",
+      "name": "Prenatal of 30 tab",
+      "generic_name": "prenatal",
+      "swap_action": "swap"
+    },
+    {
+      "id": "34730e6f-bc3e-42c8-b356-664f58f379e4",
+      "name": "propranolol Tablets BP",
+      "generic_name": "propmed-10",
+      "swap_action": "swap"
+    },
+    {
+      "id": "bfcf22f0-59cc-479e-99cd-e2db70165e22",
+      "name": "salbutamol 2mg/5ml 100ml syrup",
+      "generic_name": "Yoxsen",
+      "swap_action": "swap"
+    },
+    {
+      "id": "c88993b9-044c-42f9-9fbd-c546bb6aa5ae",
+      "name": "salbutamol tablets",
+      "generic_name": "salbescot 4",
+      "swap_action": "swap"
+    },
+    {
+      "id": "5200d8e2-ba7b-49df-b622-0332a107d3c9",
+      "name": "Sensation ribbed",
+      "generic_name": "sensation",
+      "swap_action": "swap"
+    },
+    {
+      "id": "9eda3cf0-9d69-4f2a-b383-7cbc69923646",
+      "name": "sildenafil citrate bp 100mg",
+      "generic_name": "vigo",
+      "swap_action": "swap"
+    },
+    {
+      "id": "d98e4dc0-6fc7-4b36-9def-027121be0226",
+      "name": "simethicon 80mg tab 5*10",
+      "generic_name": "no gas",
+      "swap_action": "swap"
+    },
+    {
+      "id": "24b99848-878a-4509-a3ff-f7de632c9569",
+      "name": "simethicone oral suspension USP",
+      "generic_name": "coliza drops",
+      "swap_action": "swap"
+    },
+    {
+      "id": "0be45eab-96ed-441d-b979-88a377585e9e",
+      "name": "snip",
+      "generic_name": "snip",
+      "swap_action": "skip"
+    },
+    {
+      "id": "3182cce4-879b-4435-b81c-3cb0b3fbd7b6",
+      "name": "supril lozenges",
+      "generic_name": "supril lozenges",
+      "swap_action": "skip"
+    },
+    {
+      "id": "239cc9d4-996a-4906-abf4-c5b273a60455",
+      "name": "Surgical Glove",
+      "generic_name": "surgical Glove",
+      "swap_action": "skip"
+    },
+    {
+      "id": "e8f7b061-e3f2-40a2-a580-3eeffc97a336",
+      "name": "teeth brush",
+      "generic_name": "DORCO",
+      "swap_action": "swap"
+    },
+    {
+      "id": "a1f3e39d-cb7c-4bb9-89b5-33d2490a96fd",
+      "name": "tetracycline skin ointment 15 g",
+      "generic_name": "tetracycline hydrochloride 3%",
+      "swap_action": "swap"
+    },
+    {
+      "id": "7f0d918d-076d-476b-a94b-354d31d949ea",
+      "name": "tetracycline USP eye ointment",
+      "generic_name": "1%Tetracycline HCL",
+      "swap_action": "swap"
+    },
+    {
+      "id": "3c039e2a-f180-442f-8e46-c6fd562b5faf",
+      "name": "Tidact",
+      "generic_name": "tidact",
+      "swap_action": "skip"
+    },
+    {
+      "id": "d0d4335a-f284-4fb4-a7dc-621e66e5f2f4",
+      "name": "Tindazole 500mg tablets 10*10",
+      "generic_name": "Tinitab",
+      "swap_action": "swap"
+    },
+    {
+      "id": "4cb571d1-00c1-4a13-ba47-7e45864772a0",
+      "name": "Tretinoic acid (retinoic acid) 20g",
+      "generic_name": "Avulga",
+      "swap_action": "swap"
+    },
+    {
+      "id": "a3402f8f-8181-4bad-8326-a1e29e8106f6",
+      "name": "vitamin B1, 6, &12 Tablets",
+      "generic_name": "neuroscot forte",
+      "swap_action": "swap"
+    },
+    {
+      "id": "35a3ed46-6c04-486f-86cf-1cd48eb5ed5c",
+      "name": "Vitamin C",
+      "generic_name": "Nat-Ester",
+      "swap_action": "swap"
+    },
+    {
+      "id": "585715e9-ee6a-43c0-91b6-04f4e36c2106",
+      "name": "wipes",
+      "generic_name": "moony",
+      "swap_action": "swap"
+    },
+    {
+      "id": "36bcc932-7182-4087-af55-68e7c2190518",
+      "name": "zorric twin disposable razot",
+      "generic_name": "disposable blade",
+      "swap_action": "swap"
+    }
+  ]
+}

@@ -156,16 +156,22 @@ class _EditMedicinePageState extends ConsumerState<EditMedicinePage> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                 children: [
                   TextFormField(
-                    controller: _name,
-                    decoration: const InputDecoration(labelText: 'Name'),
-                    validator: (v) =>
-                        FormValidators.requiredText(v, label: 'Name'),
+                    controller: _generic,
+                    decoration: const InputDecoration(
+                      labelText: 'Generic name',
+                      hintText: 'Ingredient, strength, and form',
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
-                    controller: _generic,
+                    controller: _name,
                     decoration: const InputDecoration(
-                      labelText: 'Generic name (optional)',
+                      labelText: 'Brand / trade name',
+                      hintText: 'e.g. Aldaz, Panadol',
+                    ),
+                    validator: (v) => FormValidators.requiredText(
+                      v,
+                      label: 'Brand / trade name',
                     ),
                   ),
                   const SizedBox(height: 12),

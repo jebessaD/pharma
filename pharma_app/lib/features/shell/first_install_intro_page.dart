@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/app_assets.dart';
 import '../../core/onboarding/first_install_intro.dart';
 import '../../core/shared_preferences_provider.dart';
+import '../../core/widgets/pharmacy_page_app_bar.dart';
 
 class FirstInstallIntroPage extends ConsumerStatefulWidget {
   const FirstInstallIntroPage({super.key});
@@ -42,12 +43,15 @@ class _FirstInstallIntroPageState extends ConsumerState<FirstInstallIntroPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: _finishing ? null : _finish,
-                      child: const Text('Skip'),
-                    ),
+                  Row(
+                    children: [
+                      const Spacer(),
+                      TextButton(
+                        onPressed: _finishing ? null : _finish,
+                        child: const Text('Skip'),
+                      ),
+                      preLoginContactUsAction(context),
+                    ],
                   ),
                   const Spacer(flex: 2),
                   Center(

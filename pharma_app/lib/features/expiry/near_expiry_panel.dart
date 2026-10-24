@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
+import '../../core/medicine/medicine_display.dart';
 import '../../core/layout/layout_density.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
@@ -31,12 +32,13 @@ class _NearExpiryPanelState extends ConsumerState<NearExpiryPanel> {
       if (_query.trim().isEmpty) return true;
       final batch = r['medicine_batches'] as Map<String, dynamic>?;
       final med = batch?['medicines'] as Map<String, dynamic>?;
-      return (med?['name'] as String? ?? '').toLowerCase().contains(
-            _query.trim().toLowerCase(),
-          ) ||
-          ('${batch?['batch_no'] ?? ''}').toLowerCase().contains(
-            _query.trim().toLowerCase(),
-          );
+      final medMap = med ?? const <String, dynamic>{};
+      final q = _query.trim().toLowerCase();
+      final haystack =
+          '${medicinePrimaryLabel(medMap)} ${medicineBrandName(medMap)} ${medicineGenericName(medMap)}'
+              .toLowerCase();
+      return haystack.contains(q) ||
+          ('${batch?['batch_no'] ?? ''}').toLowerCase().contains(q);
     }).toList();
   }
 
@@ -70,7 +72,7 @@ class _NearExpiryPanelState extends ConsumerState<NearExpiryPanel> {
       final data = await Supabase.instance.client
           .from('stock_balances')
           .select(
-            'qty_base_unit, medicine_batches(batch_no, expiry_date, medicines(name))',
+            'qty_base_unit, medicine_batches(batch_no, expiry_date, medicines(name, generic_name))',
           )
           .eq('team_id', teamId)
           .eq('branch_id', branchId);
@@ -183,6 +185,9 @@ class _NearExpiryPanelState extends ConsumerState<NearExpiryPanel> {
                   final daysLeft = expDate?.difference(DateTime.now()).inDays;
                   final isUrgent = (daysLeft ?? 999) <= 7;
                   final qty = (r['qty_base_unit'] as num?) ?? 0;
+                  final medMap = med ?? const <String, dynamic>{};
+                  final primary = medicinePrimaryLabel(medMap);
+                  final brand = medicineSecondaryLabel(medMap);
                   return PharmacyHubListRow(
                     icon: isUrgent
                         ? Icons.warning_amber_rounded
@@ -191,9 +196,11 @@ class _NearExpiryPanelState extends ConsumerState<NearExpiryPanel> {
                     borderColor: isUrgent
                         ? cs.error.withValues(alpha: 0.45)
                         : null,
-                    title: med?['name'] as String? ?? '',
-                    subtitle:
-                        'Batch ${batch?['batch_no'] ?? 'No batch'} · exp ${formatDdMmYyyy(batch?['expiry_date'])} · qty $qty',
+                    title: primary,
+                    subtitle: [
+                      if (brand != null) brand,
+                      'Batch ${batch?['batch_no'] ?? 'No batch'} · exp ${formatDdMmYyyy(batch?['expiry_date'])} · qty $qty',
+                    ].join(' · '),
                     trailing: Text(
                       daysLeft == null
                           ? '—'

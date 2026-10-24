@@ -15,6 +15,7 @@ import '../../core/providers/selected_branch_provider.dart';
 import '../../core/providers/sync_status_provider.dart';
 import '../../core/review/app_review_prompter.dart';
 import '../../core/utils/etb_amount_display.dart';
+import '../../core/medicine/medicine_display.dart';
 import '../medicines/medicine_search_bar.dart';
 import '../medicines/scan/medicine_lookup_resolver.dart';
 import '../medicines/scan/medicine_scan_controller.dart';
@@ -626,8 +627,8 @@ class _PosPageState extends ConsumerState<PosPage> {
 
     final line = _PosCartLine(
       medicineId: medicineId,
-      medicineName: medicine['name'] as String? ?? 'Medicine',
-      genericName: medicine['generic_name'] as String? ?? '',
+      medicineName: medicinePrimaryLabel(medicine),
+      genericName: medicineSecondaryLabel(medicine) ?? '',
       country: medicine['country'] as String? ?? '',
       manualCode: medicine['manual_code'] as String? ?? '',
       listPricePerBase: sell,

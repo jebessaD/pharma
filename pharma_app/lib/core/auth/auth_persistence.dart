@@ -8,6 +8,7 @@ const lastLoginAtKey = 'last_login_at';
 const pendingOwnerSignupEmailKey = 'pending_owner_signup_email';
 const pendingOwnerSignupTeamNameKey = 'pending_owner_signup_team_name';
 const pendingOwnerSignupFullNameKey = 'pending_owner_signup_full_name';
+const pendingOwnerSignupPhoneKey = 'pending_owner_signup_phone';
 const pendingOwnerSignupCountryCodeKey =
     'pending_owner_signup_registration_country_code';
 const pendingOwnerSignupCountryNameKey =
@@ -35,11 +36,13 @@ Future<void> persistPendingOwnerSignup(
   required String email,
   required String teamName,
   required String fullName,
+  String? phone,
   RegistrationLocation registrationLocation = RegistrationLocation.empty,
 }) async {
   await prefs.setString(pendingOwnerSignupEmailKey, email.trim().toLowerCase());
   await prefs.setString(pendingOwnerSignupTeamNameKey, teamName.trim());
   await prefs.setString(pendingOwnerSignupFullNameKey, fullName.trim());
+  await _setNullableString(prefs, pendingOwnerSignupPhoneKey, phone);
   await _setNullableString(
     prefs,
     pendingOwnerSignupCountryCodeKey,
@@ -71,6 +74,7 @@ Future<void> persistPendingOwnerSignup(
   String? email,
   String? teamName,
   String? fullName,
+  String? phone,
   RegistrationLocation registrationLocation,
 })
 readPendingOwnerSignup(SharedPreferences prefs) {
@@ -78,6 +82,7 @@ readPendingOwnerSignup(SharedPreferences prefs) {
     email: prefs.getString(pendingOwnerSignupEmailKey),
     teamName: prefs.getString(pendingOwnerSignupTeamNameKey),
     fullName: prefs.getString(pendingOwnerSignupFullNameKey),
+    phone: prefs.getString(pendingOwnerSignupPhoneKey),
     registrationLocation: RegistrationLocation(
       countryCode: prefs.getString(pendingOwnerSignupCountryCodeKey),
       countryName: prefs.getString(pendingOwnerSignupCountryNameKey),
@@ -92,6 +97,7 @@ Future<void> clearPendingOwnerSignup(SharedPreferences prefs) async {
   await prefs.remove(pendingOwnerSignupEmailKey);
   await prefs.remove(pendingOwnerSignupTeamNameKey);
   await prefs.remove(pendingOwnerSignupFullNameKey);
+  await prefs.remove(pendingOwnerSignupPhoneKey);
   await prefs.remove(pendingOwnerSignupCountryCodeKey);
   await prefs.remove(pendingOwnerSignupCountryNameKey);
   await prefs.remove(pendingOwnerSignupRegionKey);

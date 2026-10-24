@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/medicine/medicine_display.dart';
+
 typedef RecentSalesQuery = ({
   String teamId,
   String branchId,
@@ -33,13 +35,16 @@ class RecentSale {
 
 class RecentSaleItem {
   const RecentSaleItem({
-    required this.name,
-    required this.genericName,
+    required this.primaryLabel,
+    this.brandLabel,
     required this.qty,
   });
 
-  final String name;
-  final String? genericName;
+  /// Generic (or sole name when no generic).
+  final String primaryLabel;
+
+  /// Brand / trade name when distinct from [primaryLabel].
+  final String? brandLabel;
   final num qty;
 }
 
@@ -147,8 +152,8 @@ List<RecentSaleItem> _parseRecentSaleItems(Object? raw) {
         ? Map<String, dynamic>.from(batch['medicines'] as Map)
         : const <String, dynamic>{};
     return RecentSaleItem(
-      name: medicine['name'] as String? ?? 'Item',
-      genericName: medicine['generic_name'] as String?,
+      primaryLabel: medicinePrimaryLabel(medicine),
+      brandLabel: medicineSecondaryLabel(medicine),
       qty: item['qty'] as num? ?? 0,
     );
   }).toList();

@@ -8,6 +8,7 @@ import '../../core/utils/refresh_alerts_silent.dart';
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
 import '../../core/medicine_catalog/medicine_catalog.dart';
+import '../../core/medicine/medicine_display.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
@@ -69,17 +70,10 @@ class _CreatePurchasePageState extends ConsumerState<CreatePurchasePage> {
   String _medicineDisplayName(String medicineId) {
     for (final m in _medicines) {
       if (m['id'] == medicineId) {
-        final code = m['manual_code'] as String? ?? '';
-        final barcode = m['barcode'] as String? ?? '';
-        final name = m['name'] as String? ?? '';
-        final parts = <String>[];
-        if (code.isNotEmpty) parts.add(code);
-        if (barcode.isNotEmpty) parts.add(barcode);
-        if (parts.isEmpty) return name;
-        return '$name (${parts.join(' / ')})';
+        return medicineAutocompleteLabel(m);
       }
     }
-    return medicineId;
+    return 'Medicine';
   }
 
   @override
@@ -1453,22 +1447,25 @@ class _AddMedicineFromPurchaseDialogState
               mainAxisSize: MainAxisSize.min,
               children: [
                 MedicineCatalogAutocompleteField(
-                  controller: _name,
-                  catalog: widget.catalog,
-                  label: 'Name',
-                  onSelected: _applyCatalogEntry,
-                  validator: (v) =>
-                      FormValidators.requiredText(v, label: 'Name'),
-                ),
-                const SizedBox(height: 10),
-                MedicineCatalogAutocompleteField(
                   controller: _generic,
                   catalog: widget.catalog,
-                  label: 'Generic name (optional)',
-                  hintText: 'Search by generic or medicine name',
+                  label: 'Generic name',
+                  hintText: 'Search by generic, brand, or strength',
                   displayTextForOption: (entry) =>
                       entry.genericName ?? entry.name,
                   onSelected: _applyCatalogEntry,
+                ),
+                const SizedBox(height: 10),
+                MedicineCatalogAutocompleteField(
+                  controller: _name,
+                  catalog: widget.catalog,
+                  label: 'Brand / trade name',
+                  hintText: 'e.g. Aldaz, Panadol',
+                  onSelected: _applyCatalogEntry,
+                  validator: (v) => FormValidators.requiredText(
+                    v,
+                    label: 'Brand / trade name',
+                  ),
                 ),
                 const SizedBox(height: 10),
                 TextFormField(

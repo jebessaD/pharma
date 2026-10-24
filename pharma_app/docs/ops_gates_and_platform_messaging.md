@@ -66,14 +66,16 @@ Control **whether a team may use pharmacy features** beyond a simple trial date:
 
 ### Where to manage
 
-Supabase **Table Editor** → **`teams`**, or **SQL Editor** / automation (e.g. future Stripe webhooks updating `billing_status`).
+Preferred: the **superadmin dashboard** at `/superadmin` in the web app. Select one team (Details → Manage team) or tick several rows for bulk actions. Every change goes through `superadmin_update_teams`, which validates input, throttles runaway loops, and writes a `platform_admin_audit` row you can read back on the team's **Admin log** tab.
+
+Fallback: Supabase **Table Editor** → **`teams`**, or **SQL Editor** / automation (e.g. future Stripe webhooks updating `billing_status`). Direct SQL bypasses the audit trail.
 
 ### Columns (relevant to this feature)
 
 | Column | Notes |
 |--------|--------|
 | `status` | Platform-level: `active` vs `suspended`. Suspended teams use **`/suspended`** (unchanged). |
-| `trial_ends_at` | Trial end instant (UTC). Still used when `billing_status = 'trial'`. |
+| `trial_ends_at` | Trial end instant (UTC). Still used when `billing_status = 'trial'`. New teams get **3 months** from signup (`bootstrap_owner_team`). |
 | `billing_status` | One of: `trial`, `active`, `grace`, `past_due`, `suspended_billing`, `churned` (see migration `CHECK`). |
 | `billing_grace_ends_at` | Used when `billing_status = 'grace'`; after this time (if set), access aligns with “grace expired” behavior. |
 

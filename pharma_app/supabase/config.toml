@@ -8,3 +8,6 @@ verify_jwt = true
 
 [functions.registration-location]
 verify_jwt = false
+
+[functions.inventory-import-extract]
+verify_jwt = true

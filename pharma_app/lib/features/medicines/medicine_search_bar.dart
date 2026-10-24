@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Ranks medicines to favor name-first matching for typing flows.
+import '../../core/medicine/medicine_display.dart';
+
+export '../../core/medicine/medicine_display.dart'
+    show medicineDetailParts, medicineText;
+
+/// Ranks medicines with generic-first matching for typing flows.
 List<Map<String, dynamic>> rankMedicines(
   List<Map<String, dynamic>> rows,
   String q,
@@ -16,10 +21,10 @@ List<Map<String, dynamic>> rankMedicines(
     final details = medicineDetailParts(m).join(' ').toLowerCase();
     if (barcode == t) return 0;
     if (code == t) return 0;
-    if (name.startsWith(t)) return 1;
-    if (name.contains(t)) return 2;
-    if (gen.startsWith(t)) return 3;
-    if (gen.contains(t)) return 4;
+    if (gen.startsWith(t)) return 1;
+    if (gen.contains(t)) return 2;
+    if (name.startsWith(t)) return 3;
+    if (name.contains(t)) return 4;
     if (barcode.startsWith(t)) return 5;
     if (code.startsWith(t)) return 5;
     if (barcode.contains(t)) return 6;
@@ -34,20 +39,11 @@ List<Map<String, dynamic>> rankMedicines(
       final sa = score(a);
       final sb = score(b);
       if (sa != sb) return sa.compareTo(sb);
-      return (a['name'] as String? ?? '').compareTo(b['name'] as String? ?? '');
+      final ga = medicinePrimaryLabel(a);
+      final gb = medicinePrimaryLabel(b);
+      return ga.compareTo(gb);
     });
   return copy.where((m) => score(m) < 99).toList();
-}
-
-String medicineText(Map<String, dynamic> row, String key) {
-  return row[key]?.toString().trim() ?? '';
-}
-
-List<String> medicineDetailParts(Map<String, dynamic> row) {
-  return [
-    medicineText(row, 'country'),
-    medicineText(row, 'manual_code'),
-  ].where((value) => value.isNotEmpty).toList(growable: false);
 }
 
 Widget? medicineSearchSubtitle(
@@ -56,9 +52,9 @@ Widget? medicineSearchSubtitle(
   String? leadingMessage,
   TextStyle? leadingStyle,
 }) {
-  final generic = medicineText(row, 'generic_name');
+  final brand = medicineSecondaryLabel(row);
   final details = medicineDetailParts(row);
-  if (leadingMessage == null && generic.isEmpty && details.isEmpty) {
+  if (leadingMessage == null && brand == null && details.isEmpty) {
     return null;
   }
   final textTheme = Theme.of(context).textTheme;
@@ -73,9 +69,9 @@ Widget? medicineSearchSubtitle(
           overflow: TextOverflow.ellipsis,
           style: leadingStyle,
         ),
-      if (generic.isNotEmpty)
+      if (brand != null)
         Text(
-          generic,
+          brand,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: textTheme.bodyMedium,
@@ -109,8 +105,8 @@ class MedicineSearchResultTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final name = medicineText(row, 'name');
-    final generic = medicineText(row, 'generic_name');
+    final primary = medicinePrimaryLabel(row);
+    final brand = medicineSecondaryLabel(row);
     final country = medicineText(row, 'country');
     final code = medicineText(row, 'manual_code');
     final barcode = medicineText(row, 'barcode');
@@ -129,7 +125,7 @@ class MedicineSearchResultTile extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              name.isEmpty ? 'Medicine' : name,
+              primary,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.titleSmall?.copyWith(
@@ -137,10 +133,10 @@ class MedicineSearchResultTile extends StatelessWidget {
                 height: 1.15,
               ),
             ),
-            if (generic.isNotEmpty) ...[
+            if (brand != null) ...[
               const SizedBox(height: 2),
               Text(
-                generic,
+                brand,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
@@ -250,7 +246,7 @@ class _MedicineSearchBarState extends State<MedicineSearchBar> {
           controller: _controller,
           decoration: InputDecoration(
             labelText: 'Search medicine',
-            hintText: 'Code, name, or generic',
+            hintText: 'Generic, brand, code, or barcode',
             suffixIcon: _loading
                 ? const Padding(
                     padding: EdgeInsets.all(12),

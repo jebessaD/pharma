@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/forms/form_error_mapper.dart';
 import '../../core/forms/form_validators.dart';
+import '../../core/medicine/medicine_display.dart';
 import '../../core/medicine_catalog/medicine_catalog.dart';
 import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
@@ -54,10 +56,17 @@ enum _LookupTarget { single, bulk }
 
 /// Stock in: **One batch** and **Many lines** on one screen (tabs). Expiry: `dd/MM/yyyy` digits + slashes.
 class StockInPage extends ConsumerStatefulWidget {
-  const StockInPage({super.key, this.openBulkTab = false});
+  const StockInPage({
+    super.key,
+    this.openBulkTab = false,
+    this.openImportTab = false,
+  });
 
   /// Open with the "Many lines" tab (e.g. `/pharmacy/stock-in?tab=bulk`).
   final bool openBulkTab;
+
+  /// Open with the Import tab (e.g. `/pharmacy/stock-in?tab=import`).
+  final bool openImportTab;
 
   @override
   ConsumerState<StockInPage> createState() => _StockInPageState();
@@ -97,14 +106,20 @@ class _StockInPageState extends ConsumerState<StockInPage>
   _LookupTarget? _lookupTarget;
   int? _lookupBulkIndex;
 
+  /// When false, tab 2 is Import. Set true to restore Many lines (code kept).
+  static const bool _showManyLinesTab = false;
+
   @override
   void initState() {
     super.initState();
     _branchGuard = ref.read(branchChangeGuardProvider.notifier);
+    final openSecondTab = _showManyLinesTab
+        ? widget.openBulkTab
+        : widget.openImportTab;
     _tabs = TabController(
       length: 2,
       vsync: this,
-      initialIndex: widget.openBulkTab ? 1 : 0,
+      initialIndex: openSecondTab ? 1 : 0,
     );
     _tabs.addListener(_onTabChanged);
     _batchNo.addListener(_syncDirtyState);
@@ -297,6 +312,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
   num _resolvedSellPriceForMedicine({
     required String medicineId,
     required String fieldText,
+    required num unitCost,
   }) {
     final parsed = num.tryParse(fieldText.trim());
     if (parsed != null) return parsed;
@@ -305,8 +321,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
       orElse: () => null,
     );
     final sp = med?['selling_price'];
-    if (sp is num) return sp;
-    if (sp != null) return num.tryParse('$sp') ?? 0;
+    final existing = sp is num ? sp : (sp == null ? null : num.tryParse('$sp'));
+    if (existing != null && existing > 0) return existing;
     return 0;
   }
 
@@ -397,6 +413,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
       final sellPrice = _resolvedSellPriceForMedicine(
         medicineId: mid,
         fieldText: _singleSellPrice.text,
+        unitCost: unitCost,
       );
       final ins = await Supabase.instance.client
           .from('medicine_batches')
@@ -584,22 +601,25 @@ class _StockInPageState extends ConsumerState<StockInPage>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         MedicineCatalogAutocompleteField(
-                          controller: name,
-                          catalog: catalog,
-                          label: 'Name',
-                          onSelected: applyCatalogEntry,
-                          validator: (v) =>
-                              FormValidators.requiredText(v, label: 'Name'),
-                        ),
-                        const SizedBox(height: 10),
-                        MedicineCatalogAutocompleteField(
                           controller: generic,
                           catalog: catalog,
-                          label: 'Generic name (optional)',
-                          hintText: 'Search by generic or medicine name',
+                          label: 'Generic name',
+                          hintText: 'Search by generic, brand, or strength',
                           displayTextForOption: (entry) =>
                               entry.genericName ?? entry.name,
                           onSelected: applyCatalogEntry,
+                        ),
+                        const SizedBox(height: 10),
+                        MedicineCatalogAutocompleteField(
+                          controller: name,
+                          catalog: catalog,
+                          label: 'Brand / trade name',
+                          hintText: 'e.g. Aldaz, Panadol',
+                          onSelected: applyCatalogEntry,
+                          validator: (v) => FormValidators.requiredText(
+                            v,
+                            label: 'Brand / trade name',
+                          ),
                         ),
                         const SizedBox(height: 10),
                         TextFormField(
@@ -980,6 +1000,28 @@ class _StockInPageState extends ConsumerState<StockInPage>
       .where((line) => _lineState(line) == StockInRowState.missing)
       .length;
 
+  List<_BulkLine> get _nonEmptyBulkLines => _bulkLines
+      .where((line) => _lineState(line) != StockInRowState.empty)
+      .toList();
+
+  bool get _allNonEmptyBulkLinesReady {
+    final nonEmpty = _nonEmptyBulkLines;
+    if (nonEmpty.isEmpty) return false;
+    return nonEmpty.every((l) => _lineState(l) == StockInRowState.ready);
+  }
+
+  bool get _singleBatchReady =>
+      stockInRowState(
+        StockInDraftRow(
+          medicineId: _selectedMedicineId,
+          batchNo: _batchNo.text,
+          expiryText: _expiry.text,
+          qtyText: _qty.text,
+        ),
+        _today,
+      ) ==
+      StockInRowState.ready;
+
   Color _stateColor(BuildContext context, StockInRowState state) {
     final cs = Theme.of(context).colorScheme;
     return switch (state) {
@@ -1042,8 +1084,14 @@ class _StockInPageState extends ConsumerState<StockInPage>
       };
       final uc = num.tryParse(l.unitCost.text.trim());
       if (uc != null) row['unit_cost'] = uc;
-      final sp = num.tryParse(l.sellPrice.text.trim());
-      if (sp != null) row['sell_price'] = sp;
+      final sp = mid == null
+          ? num.tryParse(l.sellPrice.text.trim())
+          : _resolvedSellPriceForMedicine(
+              medicineId: mid,
+              fieldText: l.sellPrice.text,
+              unitCost: uc ?? 0,
+            );
+      if (sp != null && sp > 0) row['sell_price'] = sp;
       items.add(row);
     }
     if (items.isEmpty) {
@@ -1214,10 +1262,9 @@ class _StockInPageState extends ConsumerState<StockInPage>
             spacing: 6,
             runSpacing: 6,
             children: _lookupMatches.map((m) {
-              final name = m['name'] as String? ?? 'Medicine';
-              final code = m['manual_code'] as String? ?? '';
+              final label = medicineAutocompleteLabel(m);
               return ActionChip(
-                label: Text(code.isEmpty ? name : '$name ($code)'),
+                label: Text(label),
                 onPressed: () => _applyLookupMatch(
                   m,
                   target: _lookupTarget!,
@@ -1232,6 +1279,74 @@ class _StockInPageState extends ConsumerState<StockInPage>
     );
   }
 
+  Widget _buildImportTab() {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      children: [
+        Text(
+          'Import stock',
+          style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'You will review every row before stock is added.',
+          style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+        ),
+        const SizedBox(height: 20),
+        _StockImportChoiceCard(
+          icon: Icons.table_chart_outlined,
+          title: 'Excel or CSV',
+          subtitle: 'Opens your files to pick .xlsx / .csv',
+          primary: true,
+          onTap: () => context.push('/pharmacy/import-excel'),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'Photo of stock table',
+          style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        _StockImportChoiceCard(
+          icon: Icons.photo_camera_outlined,
+          title: 'Take photo',
+          subtitle: 'Use the camera',
+          primary: false,
+          onTap: () => context.push(
+            '/pharmacy/import-stock?mode=stock_in&photo=camera',
+          ),
+        ),
+        const SizedBox(height: 12),
+        _StockImportChoiceCard(
+          icon: Icons.photo_library_outlined,
+          title: 'From gallery',
+          subtitle: 'Choose an existing picture',
+          primary: false,
+          onTap: () => context.push(
+            '/pharmacy/import-stock?mode=stock_in&photo=gallery',
+          ),
+        ),
+        const SizedBox(height: 24),
+        Center(
+          child: TextButton.icon(
+            onPressed: () =>
+                context.push('/pharmacy/import-history'),
+            icon: Icon(
+              Icons.history,
+              size: 18,
+              color: cs.onSurfaceVariant,
+            ),
+            label: Text(
+              'View import history',
+              style: TextStyle(color: cs.onSurfaceVariant),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _singleHeader() {
     final isPharmacist =
         ref.watch(pharmacyRedirectCacheProvider)?.role == 'pharmacist';
@@ -1239,8 +1354,9 @@ class _StockInPageState extends ConsumerState<StockInPage>
       (m) => m?['id'] == _selectedMedicineId,
       orElse: () => null,
     );
-    final selectedName = selected?['name'] as String? ?? '';
-    final selectedCode = selected?['manual_code'] as String? ?? '';
+    final selectedLabel = selected == null
+        ? ''
+        : medicineAutocompleteLabel(selected, includeCode: true);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Column(
@@ -1306,9 +1422,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
                   children: [
                     Expanded(
                       child: Text(
-                        selectedCode.isEmpty
-                            ? selectedName
-                            : '$selectedName ($selectedCode)',
+                        selectedLabel,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodyLarge,
@@ -1487,7 +1601,10 @@ class _StockInPageState extends ConsumerState<StockInPage>
           (m) => m?['id'] == line.medicineId,
           orElse: () => null,
         );
-        final medName = med?['name'] as String? ?? 'Select medicine';
+        final medName = med == null
+            ? 'Select medicine'
+            : medicinePrimaryLabel(med);
+        final medBrand = med == null ? null : medicineSecondaryLabel(med);
         final batch = line.batchNo.text.trim().isEmpty
             ? 'No batch'
             : line.batchNo.text.trim();
@@ -1521,6 +1638,15 @@ class _StockInPageState extends ConsumerState<StockInPage>
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.titleSmall,
                         ),
+                        if (medBrand != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            medBrand,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
                         const SizedBox(height: 2),
                         Text(
                           'Batch: $batch · Qty: $qty',
@@ -1709,13 +1835,24 @@ class _StockInPageState extends ConsumerState<StockInPage>
         title: 'Stock in',
         bottom: TabBar(
           controller: _tabs,
-          tabs: const [
-            Tab(text: 'One batch'),
-            Tab(text: 'Many lines'),
+          tabs: [
+            const Tab(text: 'One batch'),
+            Tab(text: _showManyLinesTab ? 'Many lines' : 'Import'),
           ],
         ),
         actions: [
-          if (_tabs.index == 1)
+          if (!_showManyLinesTab)
+            TextButton.icon(
+              onPressed: () {
+                _tabs.animateTo(1);
+              },
+              icon: const Icon(Icons.upload_file_outlined),
+              label: const Text('Import'),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          if (_showManyLinesTab && _tabs.index == 1)
             IconButton(
               icon: const Icon(Icons.add),
               tooltip: 'Add row',
@@ -1746,14 +1883,18 @@ class _StockInPageState extends ConsumerState<StockInPage>
                 ),
               ),
             ),
-          if (_tabs.index == 0) _singleHeader() else _bulkHeader(),
-          if (_tabs.index == 0)
-            _buildLookupMatches(_singleLookupFocus)
-          else
+          if (_tabs.index == 0) ...[
+            _singleHeader(),
             _buildLookupMatches(_singleLookupFocus),
+          ] else if (_showManyLinesTab) ...[
+            _bulkHeader(),
+            _buildLookupMatches(_singleLookupFocus),
+          ],
           Expanded(
             child: TabBarView(
               controller: _tabs,
+              // Avoid accidental swipe that briefly flashes the Import tab.
+              physics: const NeverScrollableScrollPhysics(),
               children: [
                 ListView(
                   keyboardDismissBehavior:
@@ -1814,7 +1955,9 @@ class _StockInPageState extends ConsumerState<StockInPage>
                           if (_selectedMedicineId != null)
                             const SizedBox(height: 10),
                           FilledButton.icon(
-                            onPressed: _singleLoading ? null : _submitSingle,
+                            onPressed: _singleLoading || !_singleBatchReady
+                                ? null
+                                : _submitSingle,
                             icon: _singleLoading
                                 ? const SizedBox(
                                     height: 16,
@@ -1831,76 +1974,81 @@ class _StockInPageState extends ConsumerState<StockInPage>
                     ),
                   ],
                 ),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final wide = constraints.maxWidth >= 900;
-                    if (wide) {
-                      return Row(
-                        children: [
-                          Expanded(flex: 3, child: _buildBulkList()),
-                          Expanded(flex: 2, child: _buildBulkDetailPanel()),
-                        ],
-                      );
-                    }
-                    if (keyboardOpen) {
-                      const editorHeight = 332.0;
-                      return Stack(
-                        children: [
-                          Positioned.fill(
-                            child: _buildBulkList(
-                              padding: const EdgeInsets.fromLTRB(
-                                0,
-                                0,
-                                0,
-                                editorHeight + 12,
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            left: 10,
-                            right: 10,
-                            bottom: MediaQuery.viewInsetsOf(context).bottom + 8,
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(
-                                maxHeight: editorHeight,
-                              ),
-                              child: _buildBulkDetailPanel(floating: true),
-                            ),
-                          ),
-                        ],
-                      );
-                    }
-                    return LayoutBuilder(
-                      builder: (context, mobileConstraints) {
-                        final listHeight = mobileConstraints.maxHeight * 0.42;
-                        return CustomScrollView(
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.manual,
-                          slivers: [
-                            SliverToBoxAdapter(
-                              child: SizedBox(
-                                height: listHeight.clamp(180.0, 280.0),
-                                child: _buildBulkList(
-                                  padding: const EdgeInsets.only(bottom: 4),
+                if (_showManyLinesTab)
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final wide = constraints.maxWidth >= 900;
+                      if (wide) {
+                        return Row(
+                          children: [
+                            Expanded(flex: 3, child: _buildBulkList()),
+                            Expanded(flex: 2, child: _buildBulkDetailPanel()),
+                          ],
+                        );
+                      }
+                      if (keyboardOpen) {
+                        const editorHeight = 332.0;
+                        return Stack(
+                          children: [
+                            Positioned.fill(
+                              child: _buildBulkList(
+                                padding: const EdgeInsets.fromLTRB(
+                                  0,
+                                  0,
+                                  0,
+                                  editorHeight + 12,
                                 ),
                               ),
                             ),
-                            SliverToBoxAdapter(child: _buildBulkDetailPanel()),
-                            const SliverToBoxAdapter(
-                              child: SizedBox(height: 12),
+                            Positioned(
+                              left: 10,
+                              right: 10,
+                              bottom:
+                                  MediaQuery.viewInsetsOf(context).bottom + 8,
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxHeight: editorHeight,
+                                ),
+                                child: _buildBulkDetailPanel(floating: true),
+                              ),
                             ),
                           ],
                         );
-                      },
-                    );
-                  },
-                ),
+                      }
+                      return LayoutBuilder(
+                        builder: (context, mobileConstraints) {
+                          final listHeight = mobileConstraints.maxHeight * 0.42;
+                          return CustomScrollView(
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.manual,
+                            slivers: [
+                              SliverToBoxAdapter(
+                                child: SizedBox(
+                                  height: listHeight.clamp(180.0, 280.0),
+                                  child: _buildBulkList(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                  ),
+                                ),
+                              ),
+                              SliverToBoxAdapter(child: _buildBulkDetailPanel()),
+                              const SliverToBoxAdapter(
+                                child: SizedBox(height: 12),
+                              ),
+                            ],
+                          );
+                        },
+                      );
+                    },
+                  )
+                else
+                  _buildImportTab(),
               ],
             ),
           ),
         ],
       ),
-      bottomNavigationBar: _tabs.index == 1 && !keyboardOpen
+      bottomNavigationBar:
+          _showManyLinesTab && _tabs.index == 1 && !keyboardOpen
           ? SafeArea(
               top: false,
               child: Container(
@@ -1915,7 +2063,8 @@ class _StockInPageState extends ConsumerState<StockInPage>
                   children: [
                     Expanded(
                       child: Text(
-                        'Ready: $_readyLineCount  ·  Missing: $_missingLineCount  ·  Invalid: $_invalidLineCount',
+                        'Ready: $_readyLineCount  ·  Missing: $_missingLineCount  ·  Invalid: $_invalidLineCount'
+                        '${_nonEmptyBulkLines.isNotEmpty && !_allNonEmptyBulkLinesReady ? ' — complete all rows' : ''}',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: t.textTheme.bodySmall,
@@ -1923,7 +2072,10 @@ class _StockInPageState extends ConsumerState<StockInPage>
                     ),
                     const SizedBox(width: 8),
                     FilledButton.icon(
-                      onPressed: _bulkSubmitting ? null : _submitBulkReadyOnly,
+                      onPressed:
+                          _bulkSubmitting || !_allNonEmptyBulkLinesReady
+                          ? null
+                          : _submitBulkReadyOnly,
                       icon: _bulkSubmitting
                           ? const SizedBox(
                               width: 16,
@@ -1931,7 +2083,7 @@ class _StockInPageState extends ConsumerState<StockInPage>
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.save_outlined),
-                      label: const Text('Save ready rows'),
+                      label: const Text('Stock in'),
                     ),
                   ],
                 ),
@@ -1942,21 +2094,125 @@ class _StockInPageState extends ConsumerState<StockInPage>
   }
 }
 
-class _ReadOnlyPriceStrip extends StatelessWidget {
-  const _ReadOnlyPriceStrip({
-    required this.purchaseCtl,
-    required this.sellCtl,
+class _StockImportChoiceCard extends StatelessWidget {
+  const _StockImportChoiceCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.primary,
+    required this.onTap,
   });
 
-  final TextEditingController purchaseCtl;
-  final TextEditingController sellCtl;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool primary;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final cs = t.colorScheme;
-    final purchase = purchaseCtl.text.trim();
-    final sell = sellCtl.text.trim();
+    final bg = primary ? cs.primary : cs.surface;
+    final fg = primary ? cs.onPrimary : cs.onSurface;
+    final muted = primary
+        ? cs.onPrimary.withValues(alpha: 0.85)
+        : cs.onSurfaceVariant;
+
+    return Material(
+      color: bg,
+      elevation: primary ? 1 : 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: primary
+            ? BorderSide.none
+            : BorderSide(color: cs.outlineVariant, width: 1.5),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Row(
+            children: [
+              Icon(icon, color: fg, size: 28),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: t.textTheme.titleMedium?.copyWith(
+                        color: fg,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: t.textTheme.bodySmall?.copyWith(color: muted),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: muted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReadOnlyPriceStrip extends StatefulWidget {
+  const _ReadOnlyPriceStrip({required this.purchaseCtl, required this.sellCtl});
+
+  final TextEditingController purchaseCtl;
+  final TextEditingController sellCtl;
+
+  @override
+  State<_ReadOnlyPriceStrip> createState() => _ReadOnlyPriceStripState();
+}
+
+class _ReadOnlyPriceStripState extends State<_ReadOnlyPriceStrip> {
+  @override
+  void initState() {
+    super.initState();
+    widget.purchaseCtl.addListener(_refresh);
+    widget.sellCtl.addListener(_refresh);
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReadOnlyPriceStrip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.purchaseCtl != widget.purchaseCtl) {
+      oldWidget.purchaseCtl.removeListener(_refresh);
+      widget.purchaseCtl.addListener(_refresh);
+    }
+    if (oldWidget.sellCtl != widget.sellCtl) {
+      oldWidget.sellCtl.removeListener(_refresh);
+      widget.sellCtl.addListener(_refresh);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.purchaseCtl.removeListener(_refresh);
+    widget.sellCtl.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final purchase = widget.purchaseCtl.text.trim();
+    final sell = widget.sellCtl.text.trim();
     return DecoratedBox(
       decoration: BoxDecoration(
         color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
@@ -1965,24 +2221,29 @@ class _ReadOnlyPriceStrip extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: _ReadOnlyPriceCell(
-                label: 'Purchase',
-                value: purchase.isEmpty ? '—' : purchase,
-              ),
-            ),
-            Container(
-              width: 1,
-              height: 28,
-              color: cs.outlineVariant.withValues(alpha: 0.45),
-            ),
-            Expanded(
-              child: _ReadOnlyPriceCell(
-                label: 'Sell price',
-                value: sell.isEmpty ? '—' : sell,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: _ReadOnlyPriceCell(
+                    label: 'Purchase',
+                    value: purchase.isEmpty ? '—' : purchase,
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  height: 28,
+                  color: cs.outlineVariant.withValues(alpha: 0.45),
+                ),
+                Expanded(
+                  child: _ReadOnlyPriceCell(
+                    label: 'Sell price',
+                    value: sell.isEmpty ? '—' : sell,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -2006,9 +2267,7 @@ class _ReadOnlyPriceCell extends StatelessWidget {
       children: [
         Text(
           label,
-          style: t.textTheme.labelSmall?.copyWith(
-            color: cs.onSurfaceVariant,
-          ),
+          style: t.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
         ),
         const SizedBox(height: 2),
         Text(

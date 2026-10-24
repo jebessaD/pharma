@@ -30,13 +30,13 @@ class MedicineLookupResolver {
       row['manual_code'],
     ].map((value) => value?.toString() ?? '').join(' ').toLowerCase();
 
-    if (name == q || code == q || barcode == q) return 0;
-    if (name.startsWith(q)) return 1;
+    if (name == q || code == q || barcode == q || generic == q) return 0;
+    if (generic.startsWith(q)) return 1;
     if (code.startsWith(q) || barcode.startsWith(q)) return 2;
-    if (generic.startsWith(q)) return 3;
-    if (name.contains(q)) return 4;
-    if (code.contains(q) || barcode.contains(q)) return 5;
-    if (generic.contains(q)) return 6;
+    if (name.startsWith(q)) return 3;
+    if (generic.contains(q)) return 4;
+    if (name.contains(q)) return 5;
+    if (code.contains(q) || barcode.contains(q)) return 6;
     if (details.startsWith(q)) return 7;
     if (details.contains(q)) return 8;
     return 99;
@@ -119,8 +119,9 @@ class MedicineLookupResolver {
         final ar = _rank(a, q.toLowerCase());
         final br = _rank(b, q.toLowerCase());
         if (ar != br) return ar.compareTo(br);
-        return (a['name'] as String? ?? '').compareTo(
-          b['name'] as String? ?? '',
+        return (a['generic_name'] as String? ?? a['name'] as String? ?? '')
+            .compareTo(
+          b['generic_name'] as String? ?? b['name'] as String? ?? '',
         );
       });
     if (fuzzyMatches.length == 1) {

@@ -44,10 +44,25 @@ class PurchasesHubPage extends StatelessWidget {
     }
 
     return Scaffold(
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.go('/pharmacy/purchases?tab=new'),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('New purchase'),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.extended(
+            heroTag: 'import_invoice',
+            onPressed: () =>
+                context.push('/pharmacy/import-stock?mode=purchase'),
+            icon: const Icon(Icons.document_scanner_outlined),
+            label: const Text('Import photo'),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton.extended(
+            heroTag: 'new_purchase',
+            onPressed: () => context.go('/pharmacy/purchases?tab=new'),
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('New purchase'),
+          ),
+        ],
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

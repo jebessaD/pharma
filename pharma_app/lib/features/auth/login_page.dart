@@ -22,6 +22,7 @@ import '../../core/supabase_config.dart';
 import '../../core/app_assets.dart';
 import '../../core/widgets/form_error_banner.dart';
 import '../../core/widgets/pharmacy_page_app_bar.dart';
+import 'apply_team_phone.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
@@ -123,6 +124,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             (isPending ? pending.fullName : null) ??
             (meta['full_name'] as String?) ??
             '';
+        final phone =
+            (isPending ? pending.phone : null) ??
+            (meta['phone'] as String?) ??
+            '';
         final pendingLocation = isPending
             ? pending.registrationLocation
             : RegistrationLocation.empty;
@@ -132,7 +137,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             : pendingLocation;
 
         if (teamName.trim().length >= 2 && fullName.trim().isNotEmpty) {
-          await Supabase.instance.client.rpc(
+          final teamId = await Supabase.instance.client.rpc(
             'bootstrap_owner_team',
             params: {
               'p_team_name': teamName.trim(),
@@ -140,6 +145,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               ...registrationLocation.toRpcParams(),
             },
           );
+          if (teamId is String && teamId.isNotEmpty) {
+            await applyTeamProfilePhone(teamId: teamId, phone: phone);
+          }
           await clearPendingOwnerSignup(prefs);
         } else {
           // Can't bootstrap -- no team info available.
@@ -220,6 +228,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         context,
         title: 'Sign in',
         automaticallyImplyLeading: false,
+        actions: [preLoginContactUsAction(context)],
       ),
       body: SafeArea(
         child: Center(

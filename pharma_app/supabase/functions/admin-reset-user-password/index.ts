@@ -80,7 +80,8 @@ Deno.serve(async (req: Request) => {
     });
   }
   if (
-    callerProfile == null || callerProfile.role != "admin" ||
+    callerProfile == null ||
+    (callerProfile.role != "admin" && callerProfile.role != "owner") ||
     callerProfile.is_active != true
   ) {
     return new Response("forbidden", {

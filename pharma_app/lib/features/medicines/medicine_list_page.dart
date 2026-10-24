@@ -10,7 +10,9 @@ import '../../core/providers/medicine_categories_provider.dart';
 import '../../core/providers/pharmacy_profile_provider.dart';
 import '../../core/providers/pharmacy_redirect_cache_provider.dart';
 import '../../core/providers/selected_branch_provider.dart';
+import '../../core/roles/stock_permissions.dart';
 import '../../core/widgets/app_error_state.dart';
+import '../../core/medicine/medicine_display.dart';
 import '../../core/widgets/pharmacy_hub_list.dart';
 
 class MedicineListPage extends ConsumerStatefulWidget {
@@ -118,6 +120,8 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
     final categoriesAsync = ref.watch(activeBranchMedicineCategoriesProvider);
     final gate = ref.watch(pharmacyRedirectCacheProvider);
     final isPharmacist = gate?.role == 'pharmacist';
+    final role = ref.watch(pharmacyProfileProvider).value?['role'] as String?;
+    final canImportFromPhoto = canAddStockInForRole(role);
     final cs = Theme.of(context).colorScheme;
     final branchId = ref.watch(selectedBranchIdProvider);
     if (_lastBranchId != branchId) {
@@ -131,10 +135,29 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
     return Scaffold(
       floatingActionButton: isPharmacist
           ? null
-          : FloatingActionButton.extended(
-              onPressed: _openNewMedicine,
-              icon: const Icon(Icons.add),
-              label: const Text('Medicine'),
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (canImportFromPhoto) ...[
+                  FloatingActionButton.extended(
+                    heroTag: 'import_medicine_photo',
+                    backgroundColor: cs.primary,
+                    foregroundColor: cs.onPrimary,
+                    onPressed: () =>
+                        context.push('/pharmacy/stock-in?tab=import'),
+                    icon: const Icon(Icons.upload_file_outlined),
+                    label: const Text('Import stock'),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                FloatingActionButton.extended(
+                  heroTag: 'new_medicine',
+                  onPressed: _openNewMedicine,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Medicine'),
+                ),
+              ],
             ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -209,7 +232,7 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                                 ),
                               ),
                             PharmacyHubFilterSection(
-                              searchHint: 'Search medicine',
+                              searchHint: 'Search generic, brand, or code',
                               onSearchChanged: (value) =>
                                   setState(() => _query = value),
                               countLabel:
@@ -262,16 +285,15 @@ class _MedicineListPageState extends ConsumerState<MedicineListPage> {
                               final category = medicineCategoryLabel(
                                 m['category_key'] as String?,
                               );
+                              final brand = medicineSecondaryLabel(m);
                               return PharmacyHubListRow(
                                 icon: Icons.medication_outlined,
-                                title: m['name'] as String? ?? '',
+                                title: medicinePrimaryLabel(m),
                                 subtitle: [
+                                  if (brand != null) brand,
                                   if ((m['manual_code'] as String? ?? '')
                                       .isNotEmpty)
                                     m['manual_code'],
-                                  if ((m['generic_name'] as String? ?? '')
-                                      .isNotEmpty)
-                                    m['generic_name'],
                                   if (category.isNotEmpty) category,
                                 ].join(' · '),
                                 trailing: Icon(

@@ -426,7 +426,8 @@ class _RecentSaleItemLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final cs = t.colorScheme;
-    final generic = (item.genericName ?? '').trim();
+    final primary = item.primaryLabel;
+    final brand = (item.brandLabel ?? '').trim();
     return Padding(
       padding: EdgeInsets.only(bottom: compact ? 2 : 4),
       child: Row(
@@ -445,17 +446,17 @@ class _RecentSaleItemLine extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  item.name,
-                  maxLines: 1,
+                  primary,
+                  maxLines: compact ? 1 : 2,
                   overflow: TextOverflow.ellipsis,
                   style: (compact ? t.textTheme.labelMedium : t.textTheme.bodySmall)
                       ?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (!compact && generic.isNotEmpty)
+                if (brand.isNotEmpty)
                   Text(
-                    generic,
+                    brand,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: t.textTheme.labelSmall?.copyWith(
